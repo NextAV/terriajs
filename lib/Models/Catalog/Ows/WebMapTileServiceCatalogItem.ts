@@ -732,6 +732,17 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
         // which substitutes any remaining `{Time}` placeholders. We've
         // already pre-substituted in `baseUrl`, so this is belt-and-braces
         // for KVP.
+        //
+        // SAFE-SINGLE-SUBSTITUTION INVARIANT: when the REST template contains
+        // `{Time}`/`{time}`, our `baseUrl.replace(/\{time\}/gi, time)` above
+        // consumes all placeholders before Cesium's `setTemplateValues` runs.
+        // Cesium's pass is therefore a no-op on REST URLs that already had
+        // their placeholder, and a real substitution only happens on URLs
+        // that did NOT have one (in which case our regex was the no-op).
+        // The two passes never both substitute the same placeholder; the
+        // ordering is invariant. If Cesium ever changes the order or
+        // escaping of `setTemplateValues`, only this comment's claim is
+        // affected — the URL we hand to Cesium is already fully resolved.
         ...(isDefined(time) ? { dimensions: { Time: time } } : {})
         // TODO: implement picking for WebMapTileServiceImageryProvider
         //enablePickFeatures: this.allowFeaturePicking
@@ -746,6 +757,13 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
    * directly. We resolve to the provider for the currently-selected discrete
    * time tag so non-temporal layers (no `<Dimension>` -> tag is `undefined`)
    * keep returning a single, stable provider instance.
+   *
+   * @deprecated Use `mapItems` instead. WMS does not expose this accessor;
+   * it is kept here only to avoid breaking the pre-I7
+   * `with_operation_metadata.xml` URL-shape spec and any third-party callers
+   * that read `wmts.imageryProvider` directly. New code should resolve
+   * the provider via `mapItems[0].imageryProvider` (after filtering
+   * `ImageryParts.is`).
    */
   @computed
   get imageryProvider(): WebMapTileServiceImageryProvider | undefined {
@@ -760,6 +778,16 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
     if (imageryProvider === undefined) {
       return undefined;
     }
+
+    // Reset feature picking for the current imagery layer.
+    // We disable feature picking for the next imagery layer (cross-fade).
+    // NOTE: Cesium's `WebMapTileServiceImageryProvider.pickFeatures` always
+    // returns undefined (WMTS has no GetFeatureInfo equivalent), so this
+    // assignment is currently a no-op at runtime — it mirrors WMS shape so
+    // the contract is in place if Cesium ever adds WMTS picking, and matches
+    // the established `WebMapServiceCatalogItem` pattern for upstream parity.
+    (imageryProvider as any).enablePickFeatures = this.allowFeaturePicking;
+
     return {
       imageryProvider,
       alpha: this.opacity,
@@ -781,6 +809,12 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
       if (imageryProvider === undefined) {
         return undefined;
       }
+
+      // Disable feature picking for the next imagery layer during cross-fade.
+      // See note in `_currentImageryParts`: this is a no-op on Cesium's WMTS
+      // provider today; kept for shape-parity with WMS.
+      (imageryProvider as any).enablePickFeatures = false;
+
       return {
         imageryProvider,
         alpha: 0.0,

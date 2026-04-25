@@ -1,5 +1,6 @@
 import i18next from "i18next";
 import { autorun, runInAction } from "mobx";
+import { ImageryParts } from "../../../../lib/ModelMixins/MappableMixin";
 import WebMapTileServiceCatalogItem from "../../../../lib/Models/Catalog/Ows/WebMapTileServiceCatalogItem";
 import Terria from "../../../../lib/Models/Terria";
 
@@ -362,6 +363,74 @@ describe("WebMapTileServiceCatalogItem", function () {
       // independently of REST {Time} substitution. <Default> is 2024-03-13.
       expect(wmts.imageryProvider).toBeDefined();
       expect(wmts.imageryProvider!.dimensions).toEqual({ Time: "2024-03-13" });
+    });
+
+    it("substitutes uppercase {Time} in the REST ResourceURL (U6b)", async function () {
+      runInAction(() => {
+        wmts.setTrait(
+          "definition",
+          "url",
+          "test/WMTS/tern-landscapes-time-uppercase.xml"
+        );
+        wmts.setTrait("definition", "layer", "tern_soil_moisture_daily");
+      });
+
+      await wmts.loadMapItems();
+
+      // The uppercase fixture's ResourceURL template literally contains
+      // `{Time}` (capital T — Cesium / NASA GIBS convention). The
+      // implementation regex `/\{time\}/gi` carries the `i` flag specifically
+      // to handle this case. Positive assertion: the timestamp appears
+      // where `{Time}` was. Negative assertion: no leftover placeholder
+      // in either case. Together these prove the case-insensitive substitution
+      // path actually fires (not just the lowercase one tested in U6).
+      expect(wmts.imageryProvider).toBeDefined();
+      expect(wmts.imageryProvider!.url).toContain("2024-01-05T00:00:00Z");
+      expect(wmts.imageryProvider!.url).not.toContain("{Time}");
+      expect(wmts.imageryProvider!.url).not.toContain("{time}");
+    });
+
+    it("propagates allowFeaturePicking onto _currentImageryParts and disables it on _nextImageryParts (U6c)", async function () {
+      runInAction(() => {
+        wmts.setTrait(
+          "definition",
+          "url",
+          "test/WMTS/tern-landscapes-time.xml"
+        );
+        wmts.setTrait("definition", "layer", "tern_soil_moisture_daily");
+      });
+
+      await wmts.loadMapItems();
+      terria.timelineStack.addToTop(wmts);
+      terria.timelineStack.activate();
+
+      runInAction(() => {
+        wmts.setTrait("definition", "isPaused", false);
+        // Force a non-default `currentTime` so a `nextDiscreteTimeTag` exists
+        // and `_nextImageryParts` resolves.
+        wmts.setTrait("definition", "currentTime", "2024-01-02T00:00:00Z");
+      });
+
+      // mapItems[0] = current, mapItems[1] = next during cross-fade.
+      // Mirror of WMS spec at WebMapServiceCatalogItemSpec.ts:720-735. Cesium's
+      // WMTS provider has no real picking implementation today; this assertion
+      // verifies the plumbing matches WMS shape so upstream parity holds.
+      const imageryParts = wmts.mapItems.filter(ImageryParts.is);
+      expect(imageryParts.length).toBe(2);
+
+      const currentProvider = imageryParts[0].imageryProvider as any;
+      expect(currentProvider.enablePickFeatures).toBe(true);
+
+      const nextProvider = imageryParts[1].imageryProvider as any;
+      expect(nextProvider.enablePickFeatures).toBe(false);
+
+      // Flip allowFeaturePicking and reload — current should follow.
+      runInAction(() => {
+        wmts.setTrait("definition", "allowFeaturePicking", false);
+      });
+      const partsAfter = wmts.mapItems.filter(ImageryParts.is);
+      const currentProviderAfter = partsAfter[0].imageryProvider as any;
+      expect(currentProviderAfter.enablePickFeatures).toBe(false);
     });
 
     it("rebuilds the imagery provider when currentTime changes (U8)", async function () {
