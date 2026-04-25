@@ -512,6 +512,18 @@ class GetCapabilitiesStratum extends LoadableStratum(
    *    placeholder string `"current"`.
    * 2. The most recent discrete instant.
    * 3. `undefined` (UI falls back to `initialTimeSource`).
+   *
+   * INTENTIONAL DIVERGENCE FROM WMS: when no `<Default>` is supplied (or it
+   * equals the `"current"` sentinel), this stratum returns the latest
+   * discrete time — not `undefined`. The WMS stratum returns `undefined`
+   * here and lets `initialTimeSource="now"` drive the UI to the wall-clock.
+   *
+   * The WMTS choice is per upstream issue #7742 acceptance criteria
+   * ("otherwise latest discrete time"). Rationale: WMTS layers are typically
+   * pre-tiled archives where the wall-clock "now" is rarely a tiled instant,
+   * so anchoring to the newest available tile gives a usable initial render.
+   * If you change this, also change the U4/U5 specs in
+   * `WebMapTileServiceCatalogItemSpec.ts` and update issue #7742.
    */
   @computed
   get currentTime(): string | undefined {
@@ -573,6 +585,15 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
     return WebMapTileServiceCatalogItem.type;
   }
 
+  /**
+   * Class-level delegate: forward `discreteTimes` from the GetCapabilities
+   * stratum so `DiscretelyTimeVaryingMixin` can read it off the model
+   * directly. There is intentionally no equivalent class-level delegate for
+   * `currentTime` — the trait system (via `DiscretelyTimeVaryingTraits`)
+   * already resolves `currentTime` from strata automatically, so an
+   * explicit getter would shadow stratum priority and break override
+   * semantics. `discreteTimes` is NOT a trait, hence the explicit forward.
+   */
   @computed
   get discreteTimes() {
     const getCapabilitiesStratum: GetCapabilitiesStratum | undefined =

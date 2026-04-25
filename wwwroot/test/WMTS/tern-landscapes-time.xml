@@ -42,6 +42,38 @@
       <ResourceURL format="image/png" resourceType="tile"
                    template="https://tern.example/wmts/tern_soil_moisture_daily/default/{time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.png" />
     </Layer>
+    <!--
+      Variant layer: the time <Value> contains exactly two slash segments
+      (start/stop, NO period). createDiscreteTimesFromIsoSegments must
+      receive period=undefined and pick a default duration based on the
+      span (see createDiscreteTimes.ts:30-67). 96-hour (4-day) span falls
+      into the `1000 * hour` bucket => 1-hour duration => 97 hourly
+      instants emitted (inclusive of both ends).
+    -->
+    <Layer>
+      <ows:Title>Soil Moisture Daily (no period)</ows:Title>
+      <ows:Identifier>tern_soil_moisture_daily_no_period</ows:Identifier>
+      <ows:WGS84BoundingBox>
+        <ows:LowerCorner>112 -44</ows:LowerCorner>
+        <ows:UpperCorner>154 -10</ows:UpperCorner>
+      </ows:WGS84BoundingBox>
+      <Style isDefault="true">
+        <ows:Title>default</ows:Title>
+        <ows:Identifier>default</ows:Identifier>
+      </Style>
+      <Format>image/png</Format>
+      <Dimension>
+        <ows:Identifier>time</ows:Identifier>
+        <ows:UOM>ISO8601</ows:UOM>
+        <Default>2024-01-05T00:00:00Z</Default>
+        <Value>2024-01-01T00:00:00Z/2024-01-05T00:00:00Z</Value>
+      </Dimension>
+      <TileMatrixSetLink>
+        <TileMatrixSet>GoogleMapsCompatible_Level9</TileMatrixSet>
+      </TileMatrixSetLink>
+      <ResourceURL format="image/png" resourceType="tile"
+                   template="https://tern.example/wmts/tern_soil_moisture_daily_no_period/default/{time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.png" />
+    </Layer>
     <TileMatrixSet>
       <ows:Identifier>GoogleMapsCompatible_Level9</ows:Identifier>
       <ows:SupportedCRS>urn:ogc:def:crs:EPSG::3857</ows:SupportedCRS>
