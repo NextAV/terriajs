@@ -1,0 +1,6 @@
+# CODEOWNERS — agents-only review (workstream: WMTS time dimension upstream contribution)
+# Carve-out from references/nextav-engineering-standards.yaml.
+# Default rule routes to nextav-implementer (acts on behalf of guardian + sonnet-reviewer).
+# When the upstream PR merges and this fork's purpose is fulfilled, this file
+# can be deleted along with the repo's archival.
+* @nextav-implementer
