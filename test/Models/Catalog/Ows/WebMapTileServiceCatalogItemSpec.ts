@@ -174,4 +174,64 @@ describe("WebMapTileServiceCatalogItem", function () {
     expect(wmts.tileMatrixSet!.tileWidth).toEqual(256);
     expect(wmts.tileMatrixSet!.tileHeight).toEqual(256);
   });
+
+  describe("time dimension parsing", function () {
+    it("expands explicit <Value> children into discrete times (NASA GIBS style)", async function () {
+      runInAction(() => {
+        wmts.setTrait("definition", "url", "test/WMTS/nasa-gibs-time.xml");
+        wmts.setTrait(
+          "definition",
+          "layer",
+          "MODIS_Terra_CorrectedReflectance_TrueColor"
+        );
+      });
+
+      await wmts.loadMetadata();
+
+      expect(wmts.discreteTimes).toBeDefined();
+      expect(wmts.discreteTimes!.length).toBe(3);
+      expect(wmts.discreteTimes!.map((t) => t.time)).toEqual([
+        "2024-03-13",
+        "2024-03-14",
+        "2024-03-15"
+      ]);
+    });
+
+    it("expands an ISO 19128 start/stop/period range (TERN style)", async function () {
+      runInAction(() => {
+        wmts.setTrait(
+          "definition",
+          "url",
+          "test/WMTS/tern-landscapes-time.xml"
+        );
+        wmts.setTrait("definition", "layer", "tern_soil_moisture_daily");
+      });
+
+      await wmts.loadMetadata();
+
+      expect(wmts.discreteTimes).toBeDefined();
+      // 2024-01-01..2024-01-05 with P1D step -> 5 instants
+      expect(wmts.discreteTimes!.length).toBe(5);
+      expect(wmts.discreteTimes![0].time).toContain("2024-01-01");
+      expect(wmts.discreteTimes![4].time).toContain("2024-01-05");
+    });
+
+    it("uses <Default> for the initially-selected time when present", async function () {
+      runInAction(() => {
+        wmts.setTrait("definition", "url", "test/WMTS/nasa-gibs-time.xml");
+        wmts.setTrait(
+          "definition",
+          "layer",
+          "MODIS_Terra_CorrectedReflectance_TrueColor"
+        );
+      });
+
+      await wmts.loadMetadata();
+
+      // The stratum exposes currentTime; the mixin returns it via super.
+      // (When no Default is set, the mixin falls back to JulianDate.now()
+      // because initialTimeSource is "now".)
+      expect(wmts.currentTime).toBe("2024-03-15");
+    });
+  });
 });
