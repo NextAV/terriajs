@@ -1044,15 +1044,42 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
     let tileHeight: number = 256;
     let tileMatrixSetLabels: string[] = [];
     let scheme: WebMercatorTilingScheme | GeographicTilingScheme;
-    for (let i = 0; i < tileMatrixSetLinks.length; i++) {
-      const tileMatrixSet = tileMatrixSetLinks[i].TileMatrixSet;
-      if (usableTileMatrixSets && usableTileMatrixSets[tileMatrixSet]) {
-        tileMatrixSetId = tileMatrixSet;
-        tileMatrixSetLabels = usableTileMatrixSets[tileMatrixSet].identifiers;
-        tileWidth = Number(usableTileMatrixSets[tileMatrixSet].tileWidth);
-        tileHeight = Number(usableTileMatrixSets[tileMatrixSet].tileHeight);
-        scheme = usableTileMatrixSets[tileMatrixSet].scheme;
-        break;
+
+    // If the catalog item declares an explicit `tileMatrixSetID`, prefer it.
+    // Required when GetCapabilities advertises multiple usable matrix sets
+    // (e.g. both EPSG:4326 and EPSG:900913) and the server's listing order
+    // doesn't match the viewer's tiling scheme. Falls through to the
+    // first-usable selection if the override doesn't match any link.
+    const requestedTileMatrixSetId = this.tileMatrixSetID;
+    if (requestedTileMatrixSetId) {
+      for (let i = 0; i < tileMatrixSetLinks.length; i++) {
+        const tileMatrixSet = tileMatrixSetLinks[i].TileMatrixSet;
+        if (
+          tileMatrixSet === requestedTileMatrixSetId &&
+          usableTileMatrixSets &&
+          usableTileMatrixSets[tileMatrixSet]
+        ) {
+          tileMatrixSetId = tileMatrixSet;
+          tileMatrixSetLabels = usableTileMatrixSets[tileMatrixSet].identifiers;
+          tileWidth = Number(usableTileMatrixSets[tileMatrixSet].tileWidth);
+          tileHeight = Number(usableTileMatrixSets[tileMatrixSet].tileHeight);
+          scheme = usableTileMatrixSets[tileMatrixSet].scheme;
+          break;
+        }
+      }
+    }
+
+    if (!tileMatrixSetId) {
+      for (let i = 0; i < tileMatrixSetLinks.length; i++) {
+        const tileMatrixSet = tileMatrixSetLinks[i].TileMatrixSet;
+        if (usableTileMatrixSets && usableTileMatrixSets[tileMatrixSet]) {
+          tileMatrixSetId = tileMatrixSet;
+          tileMatrixSetLabels = usableTileMatrixSets[tileMatrixSet].identifiers;
+          tileWidth = Number(usableTileMatrixSets[tileMatrixSet].tileWidth);
+          tileHeight = Number(usableTileMatrixSets[tileMatrixSet].tileHeight);
+          scheme = usableTileMatrixSets[tileMatrixSet].scheme;
+          break;
+        }
       }
     }
 

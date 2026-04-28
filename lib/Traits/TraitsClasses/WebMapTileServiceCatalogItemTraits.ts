@@ -197,6 +197,14 @@ export default class WebMapTileServiceCatalogItemTraits extends mixTraits(
   requestEncoding = "RESTful";
 
   @primitiveTrait({
+    type: "string",
+    name: "Tile Matrix Set ID",
+    description:
+      "Explicit `TileMatrixSet` identifier to use for this layer. When the WMTS service advertises multiple matrix sets in `GetCapabilities` (e.g. both `EPSG:4326` and `EPSG:900913`), the default first-usable selection picks the one listed first by the server, which may not match the viewer's tiling scheme (Web Mercator). Set this trait to force a specific matrix set. The value must match an `Identifier` listed under `TileMatrixSetLink` for the layer in GetCapabilities. When unset, the first matrix set that passes `usableTileMatrixSets` filtering is used (existing behaviour)."
+  })
+  tileMatrixSetID?: string;
+
+  @primitiveTrait({
     type: "number",
     name: "Maximum Refresh Intervals",
     description:
