@@ -162,6 +162,36 @@ describe("WebMapTileServiceCatalogItem", function () {
     expect(wmts.tileMatrixSet!.tileHeight).toEqual(256);
   });
 
+  it("honours explicit tileMatrixSetID matching an advertised link", async function () {
+    runInAction(() => {
+      wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");
+      wmts.setTrait("definition", "layer", "Some_Layer1");
+      wmts.setTrait(
+        "definition",
+        "tileMatrixSetID",
+        "GoogleMapsCompatible_Level9"
+      );
+    });
+
+    await wmts.loadMapItems();
+    expect(wmts.tileMatrixSet).toBeDefined();
+    expect(wmts.tileMatrixSet!.id).toEqual("GoogleMapsCompatible_Level9");
+  });
+
+  it("falls through to first-usable when tileMatrixSetID does not match any link", async function () {
+    runInAction(() => {
+      wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");
+      wmts.setTrait("definition", "layer", "Some_Layer1");
+      wmts.setTrait("definition", "tileMatrixSetID", "EPSG:4326");
+    });
+
+    await wmts.loadMapItems();
+    // The fixture only advertises GoogleMapsCompatible_Level9 for Some_Layer1.
+    // Override doesn't match, so the existing first-usable behaviour wins.
+    expect(wmts.tileMatrixSet).toBeDefined();
+    expect(wmts.tileMatrixSet!.id).toEqual("GoogleMapsCompatible_Level9");
+  });
+
   xit("non existing tile matrix set", async function () {
     runInAction(() => {
       wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");
