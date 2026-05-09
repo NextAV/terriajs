@@ -1,6 +1,74 @@
 # Change Log
 
-#### next release (8.12.3)
+> **Fork note** — this branch (`wmts-time-bridge-8.12.2`) is the NextAV
+> fork of TerriaJS used by the [`nextview-viewer`](https://github.com/NextAV/nextview-viewer)
+> repo via the `package.json` pin
+> `"terriajs": "github:NextAV/terriajs#wmts-time-bridge-8.12.2"`.
+> Entries below the upstream `8.12.2 - 2026-03-27` line are
+> NextAV-specific patches; everything above is upstream.
+
+#### NextAV — Wave 3.0b WMTS rectangle forwarding (2026-05-10)
+
+Commit [`e3412a06`](https://github.com/NextAV/terriajs/commit/e3412a06).
+
+- Forward the catalog `rectangle` trait to Cesium's
+  `WebMapTileServiceImageryProvider` constructor when defined at any
+  user-visible stratum (`lib/Models/Catalog/Ows/WebMapTileServiceCatalogItem.ts:_createImageryProvider`).
+  Cesium's `ImageryLayer` then computes
+  `Rectangle.intersection(provider.rectangle, layer.rectangle)` for
+  tile-fetch decisions, so tiles outside the declared bbox are pruned
+  BEFORE the network request.
+- Without this forwarding, Cesium defaulted the imagery extent to the
+  tilingScheme's full-world rectangle and `ImageryLayer` requested
+  tiles globally regardless of the catalog `rectangle` (visual-clip-only).
+  For tile-metered backends (e.g. Sentinel Hub Processing Units) this
+  is the difference between ~5 PU and ~200 PU per layer toggle when
+  the user is at world view.
+- Backward-compat: layers that declare no rectangle (or declare a
+  full-world rectangle, e.g. `[-180, -85, 180, 85]`) continue to
+  behave exactly as before — `Rectangle.intersection(world, world) = world`
+  is bit-identical to the prior tilingScheme default.
+- Two new spec tests pin the contract (`test/Models/Catalog/Ows/WebMapTileServiceCatalogItemSpec.ts`):
+  - `forwards user-defined rectangle to Cesium WMTS provider` —
+    asserts the provider's rectangle is bounded inside a declared
+    Qatar-coast bbox.
+  - `omits rectangle when none declared (preserves world default)` —
+    asserts the provider's rectangle stays full WebMercator world
+    when no rectangle trait is set.
+- Mirrors how `WebMapServiceCatalogItem` already handles bounded
+  coverage. Candidate for upstream contribution post-demo.
+
+#### NextAV — Wave 3.0a tileMatrixSetID trait (2026-05-09)
+
+Commit `bedea8df` ([PR #17](https://github.com/NextAV/terriajs/pull/17)).
+
+- Add explicit `tileMatrixSetID` trait override on
+  `WebMapTileServiceCatalogItem` for cases where GetCapabilities
+  advertises multiple matrix sets and the default first-usable
+  selection picks the wrong one for the viewer's tiling scheme.
+
+#### NextAV — `time.values` trait override (2026-04-XX)
+
+Commit `abe8ec65a` ([PR #15](https://github.com/NextAV/terriajs/pull/15)).
+
+- Allow callers to declare an explicit `time.values` list on the
+  catalog member, used directly as the discrete time set when
+  GetCapabilities does not advertise a `<Dimension>` (e.g.
+  GeoServer GeoWebCache).
+
+#### NextAV — imagery-provider-per-time + `{Time}` URL substitution (2026-04-XX)
+
+Commit `1d3d79de3` ([PR #12](https://github.com/NextAV/terriajs/pull/12), upstreams [TerriaJS #7742](https://github.com/TerriaJS/terriajs/pull/7742)).
+
+- Wrap WMTS imagery-provider construction in
+  `createTransformerAllowUndefined` so MobX caches one provider
+  instance per `time` value. Flipping the timeline tag now ticks
+  `currentDiscreteTimeTag`/`nextDiscreteTimeTag` correctly.
+- REST `{Time}` placeholder substitution: if the resolved tile URL
+  contains a `{Time}` / `{time}` literal, substitute before
+  `proxyCatalogItemUrl` so the proxy sees the time-keyed URL.
+
+#### next release (8.12.3 upstream)
 
 - [The next improvement]
 
