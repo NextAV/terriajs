@@ -192,6 +192,63 @@ describe("WebMapTileServiceCatalogItem", function () {
     expect(wmts.tileMatrixSet!.id).toEqual("GoogleMapsCompatible_Level9");
   });
 
+  it("forwards user-defined rectangle to Cesium WMTS provider", async function () {
+    // Cost-bounded WMTS layers (e.g. Sentinel Hub Processing Units)
+    // need their declared rectangle to reach Cesium's
+    // WebMapTileServiceImageryProvider so ImageryLayer can prune
+    // tile requests outside the bbox. Without this forwarding the
+    // provider defaults to the tilingScheme's full-world rectangle
+    // and tiles are fetched globally regardless of catalog config.
+    runInAction(() => {
+      wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");
+      wmts.setTrait("definition", "layer", "Some_Layer1");
+      wmts.setTrait("user", "rectangle", {
+        west: 51.21,
+        south: 25.65,
+        east: 51.6,
+        north: 26.18
+      });
+    });
+
+    await wmts.loadMapItems();
+    const provider = wmts.imageryProvider;
+    expect(provider).toBeDefined();
+    // The provider's rectangle is in radians (Cesium internal). Sanity
+    // check: it's NOT the full-world rectangle (the default when no
+    // rectangle is forwarded). Full-world spans [-PI..PI, -PI/2..PI/2];
+    // ours is a tight strip near 51.4°E / 25.9°N, well inside.
+    expect(provider!.rectangle.west).toBeGreaterThan(0); // Qatar is east of Greenwich
+    expect(provider!.rectangle.east).toBeLessThan(Math.PI / 4); // < 45° E
+    // Forwarded rectangle must enclose the centroid of the declared
+    // bbox. (Cesium clamps to the tilingScheme; the relative ordering
+    // is what matters for tile-request pruning.)
+    const declaredCentreLonRad = ((51.21 + 51.6) / 2) * (Math.PI / 180);
+    expect(provider!.rectangle.west).toBeLessThan(declaredCentreLonRad);
+    expect(provider!.rectangle.east).toBeGreaterThan(declaredCentreLonRad);
+  });
+
+  it("omits rectangle when none declared (preserves world default)", async function () {
+    // Layers that declare no rectangle MUST keep their pre-patch
+    // behaviour: Cesium uses the tilingScheme's full-world rectangle.
+    // Forwarding `cesiumRectangle` unconditionally would regress this
+    // because MappableMixin synthesises a default-stratum world
+    // rectangle when no user/definition stratum sets one — that synth
+    // rect is not what the user "declared", so we MUST NOT forward it.
+    runInAction(() => {
+      wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");
+      wmts.setTrait("definition", "layer", "Some_Layer1");
+      // intentionally NOT setting any rectangle
+    });
+
+    await wmts.loadMapItems();
+    const provider = wmts.imageryProvider;
+    expect(provider).toBeDefined();
+    // Full-world rectangle in WebMercator radians: north/south are
+    // ~±1.4844222 (Web Mercator's max ~85.05° clamp).
+    expect(provider!.rectangle.west).toBeCloseTo(-Math.PI, 5);
+    expect(provider!.rectangle.east).toBeCloseTo(Math.PI, 5);
+  });
+
   xit("non existing tile matrix set", async function () {
     runInAction(() => {
       wmts.setTrait("definition", "url", "test/WMTS/with_tilematrix.xml");

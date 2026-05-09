@@ -834,6 +834,27 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
         return;
       }
 
+      // Forward the user-declared rectangle to Cesium's WMTS provider so
+      // tile requests outside it are pruned at the imagery-layer level
+      // (Cesium's `ImageryLayer.js` runs `Rectangle.intersection(
+      // imageryProvider.rectangle, layer.rectangle)` to decide which
+      // tiles to fetch). Without this, Cesium defaults to the
+      // tilingScheme's full-world rectangle and fetches tiles globally
+      // even when the catalog member declares a tight `rectangle` —
+      // for tile-metered backends like Sentinel Hub that's the
+      // difference between ~5 PU and ~200 PU per layer toggle.
+      //
+      // Stratum-aware: only forward the rectangle when SOMETHING in the
+      // strata actually defined one (not the default-stratum world
+      // rectangle that MappableMixin would synthesise). We check the
+      // trait's existence at the load-bearing strata rather than relying
+      // on `cesiumRectangle` directly, so layers that declared no
+      // rectangle at any user-visible stratum still get the
+      // GetCapabilities-derived default behaviour they had before.
+      const userDefinedRectangle = isDefined(this.rectangle)
+        ? this.cesiumRectangle
+        : undefined;
+
       const imageryProvider = new WebMapTileServiceImageryProvider({
         url: proxyCatalogItemUrl(this, baseUrl),
         layer: layerIdentifier,
@@ -848,6 +869,9 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
         tilingScheme: tileMatrixSet.scheme,
         format,
         credit: this.attribution,
+        ...(isDefined(userDefinedRectangle)
+          ? { rectangle: userDefinedRectangle }
+          : {}),
         // KVP path: Cesium combines `dimensions` into the GetTile query
         // string. REST path: Cesium calls `setTemplateValues(staticDimensions)`
         // which substitutes any remaining `{Time}` placeholders. We've
