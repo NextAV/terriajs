@@ -861,11 +861,20 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
         style: this.style,
         tileMatrixSetID: tileMatrixSet.id,
         tileMatrixLabels: tileMatrixSet.labels,
-        minimumLevel: tileMatrixSet.minLevel,
-        maximumLevel: tileMatrixSet.maxLevel,
+        // NextAV fork (Wave 3.0c): honor catalog-member minimumLevel/
+        // maximumLevel traits when present. Upstream TerriaJS ignored
+        // the user-declared values and used the GetCapabilities-
+        // advertised range. SH tile-metered backends advertise
+        // minLevel=0 but refuse low-zoom tiles with HTTP 400 + body
+        // "Your request of 2225.27 meters per pixel exceeds the
+        // limit 1500.00 meters per pixel of the collection S2L2A".
+        // Setting minimumLevel: 7 on the catalog member now keeps
+        // Cesium from requesting world-pyramid parent tiles,
+        // eliminating 400-spam + PU burn at boot for SH WMTS layers.
+        minimumLevel: this.minimumLevel ?? tileMatrixSet.minLevel,
+        maximumLevel: this.maximumLevel ?? tileMatrixSet.maxLevel,
         tileWidth: this.tileWidth ?? tileMatrixSet.tileWidth,
-        tileHeight:
-          this.tileHeight ?? this.minimumLevel ?? tileMatrixSet.tileHeight,
+        tileHeight: this.tileHeight ?? tileMatrixSet.tileHeight,
         tilingScheme: tileMatrixSet.scheme,
         format,
         credit: this.attribution,
