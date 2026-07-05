@@ -270,7 +270,15 @@ export default abstract class GlobeOrMap {
             }
           }
         };
-      } else if (isDefined(feature.polygon)) {
+      } else if (
+        isDefined(feature.polygon) &&
+        // Skip the gray polygon-fill highlight for a pick-only contour fill (GeojsonMixin flags these when it
+        // keeps an unfilled bold-contour polygon as a near-invisible pickable fill). Highlighting the fill
+        // would paint the whole shape gray (the "#435 dark square"); instead fall through to the polyline
+        // branch below so the bold CONTOUR line is highlighted. Read the flag off the same object the
+        // highlight mutates (feature.cesiumEntity ?? feature — the Cesium Entity, mirroring line 276).
+        !((feature.cesiumEntity ?? feature) as any)?._contourPickFill
+      ) {
         hasGeometry = true;
 
         const cesiumPolygon = feature.cesiumEntity || feature;
