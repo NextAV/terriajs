@@ -78,6 +78,14 @@ export class GeoJsonTraits extends mixTraits(
 
   @primitiveTrait({
     type: "boolean",
+    name: "Pickable contour interior",
+    description:
+      "For an unfilled bold-contour polygon (fill-opacity 0 + stroke-width > 1, which is drawn as a bold polyline), keep the polygon as a pick-only, near-invisible fill so the WHOLE interior is selectable (firing click-to-zoom / feature-info), instead of dropping it (which leaves only the thin contour line clickable). Default `false`, because a full-extent fill is pickable in Cesium's ground-primitive pass: a purely-visual FRAME/CONTEXT polygon that opts in would shadow smaller PRODUCT features drawn under it (the ground-primitive batch returns the frame over every product feature). Opt in ONLY on the product layer whose contour interiors should be clickable; leave frame/AOI-boundary layers at the default so they stay non-pickable outlines."
+  })
+  pickableContourInterior: boolean = false;
+
+  @primitiveTrait({
+    type: "boolean",
     name: "Force cesium primitives",
     description:
       "Force rendering GeoJSON features as Cesium primitives. This will be true if you are using `style`, `perPropertyStyles`, `timeProperty`, `heightProperty` or `czmlTemplate`. If undefined, geojson-vt/protomaps will be used. This will be set to true if simplestyle-spec properties are detected in over 50% of GeoJSON features, or if any MultiPoint features are found "

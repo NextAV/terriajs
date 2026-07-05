@@ -37,6 +37,7 @@ export function axesMatch(a1: ChartAxis, a2: ChartAxis) {
 
 export type ChartItemType =
   | "line"
+  | "bar"
   | "momentLines"
   | "momentPoints"
   | "lineAndPoint";

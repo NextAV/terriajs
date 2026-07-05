@@ -3,6 +3,7 @@ import { Line } from "@visx/shape";
 import { observer } from "mobx-react";
 import { memo, useEffect, useRef, type ComponentPropsWithoutRef } from "react";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
+import BarChart from "./BarChart";
 import LineAndPointChart from "./LineAndPointChart";
 import LineChart from "./LineChart";
 import MomentLinesChart from "./MomentLinesChart";
@@ -55,6 +56,16 @@ export const Plot = memo(
                   scales={initialScales[i]}
                 />
               );
+            case "bar":
+              return (
+                <BarChart
+                  key={chartItem.key}
+                  ref={(node) => addToRefs(id, node)}
+                  id={id}
+                  chartItem={chartItem}
+                  scales={initialScales[i]}
+                />
+              );
             case "momentPoints": {
               // Find a basis item to stick the points on, if we can't find one, we
               // vertically center the points
@@ -99,6 +110,14 @@ export const Plot = memo(
                   glyph={chartItem.glyphStyle}
                 />
               );
+            }
+            default: {
+              // Exhaustiveness guard: every ChartItemType must have a case above.
+              // If a new type is added to the union without a case here, this
+              // assignment fails the build (chartItem.type is no longer `never`),
+              // turning a silent "renders nothing" into a compile error.
+              const _exhaustive: never = chartItem.type;
+              return _exhaustive;
             }
           }
         })}

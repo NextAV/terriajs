@@ -155,6 +155,87 @@ describe("GeoJsonCatalogItemSpec", () => {
         expect(geojson.readyData?.features.length).toBe(1);
       });
 
+      describe("unfilled bold-contour polygons (fill-opacity 0 + stroke-width > 1)", () => {
+        // An unfilled wide-outline polygon is drawn as a bold POLYLINE. Whether its interior
+        // stays a pick target is gated by `pickableContourInterior`, so a full-extent
+        // frame/context polygon can't shadow smaller product features under it in the pick.
+        const unfilledWideOutlinePolygon = {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: {
+                stroke: "#ff0000",
+                "stroke-width": 3,
+                "fill-opacity": 0
+              },
+              geometry: {
+                type: "Polygon",
+                coordinates: [
+                  [
+                    [144.8, -32.9],
+                    [145.0, -33.1],
+                    [145.5, -32.6],
+                    [145.0, -32.3],
+                    [144.8, -32.9]
+                  ]
+                ]
+              }
+            }
+          ]
+        };
+
+        it("drops the polygon (polyline-only, non-pickable interior) by default", async () => {
+          geojson.setTrait(
+            CommonStrata.user,
+            "geoJsonData",
+            unfilledWideOutlinePolygon
+          );
+          await geojson.loadMapItems();
+          const entity = (geojson.mapItems[0] as GeoJsonDataSource).entities
+            .values[0];
+          // The bold contour is drawn as a polyline...
+          expect(entity.polyline).toBeDefined();
+          // ...and the polygon is dropped, so only the thin contour LINE is a pick target.
+          // A frame/context polygon must land here so it can't shadow product features.
+          expect(entity.polygon).toBeUndefined();
+        });
+
+        it("keeps the polygon as a pick-only fill when pickableContourInterior is set", async () => {
+          geojson.setTrait(CommonStrata.user, "pickableContourInterior", true);
+          geojson.setTrait(
+            CommonStrata.user,
+            "geoJsonData",
+            unfilledWideOutlinePolygon
+          );
+          await geojson.loadMapItems();
+          const entity = (geojson.mapItems[0] as GeoJsonDataSource).entities
+            .values[0];
+          // The bold contour is still drawn as a polyline...
+          expect(entity.polyline).toBeDefined();
+          // ...but the polygon is KEPT as a (near-invisible) pickable fill so the whole
+          // interior selects the feature, flagged so the selection highlight skips the
+          // gray fill and highlights the contour line instead.
+          expect(entity.polygon).toBeDefined();
+          expect(entity.polygon?.fill?.getValue(JulianDate.now())).toBe(true);
+          // The fill must stay (near-)invisible: Cesium discards alpha 0 in the pick
+          // pass, so 0.01 is the smallest pickable alpha. Lock alpha < 0.05 so a
+          // future "make it prettier" edit can't raise it into a visible fill (the
+          // #435 dark square) while still satisfying the fill === true assertion.
+          const material = entity.polygon?.material as unknown as {
+            color?: {
+              getValue: (t: JulianDate) => { alpha: number } | undefined;
+            };
+          };
+          const fillColour = material?.color?.getValue(JulianDate.now());
+          expect(fillColour?.alpha).toBeLessThan(0.05);
+          expect(
+            (entity as unknown as { _contourPickFill?: boolean })
+              ._contourPickFill
+          ).toBe(true);
+        });
+      });
+
       it("reloads when the URL is changed", async function () {
         geojson.setTrait(
           CommonStrata.user,
