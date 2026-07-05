@@ -3,6 +3,7 @@ import { Line } from "@visx/shape";
 import { observer } from "mobx-react";
 import { memo, useEffect, useRef, type ComponentPropsWithoutRef } from "react";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
+import BarChart from "./BarChart";
 import LineAndPointChart from "./LineAndPointChart";
 import LineChart from "./LineChart";
 import MomentLinesChart from "./MomentLinesChart";
@@ -48,6 +49,16 @@ export const Plot = memo(
             case "line":
               return (
                 <LineChart
+                  key={chartItem.key}
+                  ref={(node) => addToRefs(id, node)}
+                  id={id}
+                  chartItem={chartItem}
+                  scales={initialScales[i]}
+                />
+              );
+            case "bar":
+              return (
+                <BarChart
                   key={chartItem.key}
                   ref={(node) => addToRefs(id, node)}
                   id={id}
