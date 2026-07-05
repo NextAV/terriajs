@@ -1153,13 +1153,67 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
           }
           // Cesium on Windows can't render polygons with a stroke-width > 1.0.  And even on other platforms it
           // looks bad because WebGL doesn't mitre the lines together nicely.
-          // As a workaround for the special case where the polygon is unfilled anyway, change it to a polyline.
+          // As a workaround for the special case where the polygon is unfilled anyway, draw the outline as a
+          // bold polyline instead of a wide polygon outline.
           else if (
             polygonHasWideOutline(entity.polygon, now) &&
             !polygonIsFilled(entity.polygon)
           ) {
+            // Draw the bold contour as a polyline (as before).
             createPolylineFromPolygon(entities, entity, now);
-            entity.polygon = undefined;
+            // Historically we dropped the polygon entirely (`entity.polygon = undefined`), which left the
+            // interior with no pick target — only the thin contour line was clickable. Instead, KEEP the
+            // polygon as a pick-only, (near-)invisible fill so the whole interior is selectable (firing the
+            // click-to-zoom / feature-info handlers), while the polyline remains the only *visible* outline.
+            //
+            // Cesium needs a filled polygon to pick the interior. It renders translucent geometry in the pick
+            // pass, but its pick fragment shader DISCARDS any fragment whose material alpha is exactly 0.0
+            // (terriajs-cesium 23.0.2 ShaderSource.createPickFragmentShaderSource:
+            //   `if (out_FragColor.a == 0.0) { discard; } out_FragColor = czm_pickColor;`).
+            // A truly-transparent (alpha 0) fill is therefore NOT pickable. So we use the smallest clearly
+            // non-zero alpha (0.01): it survives the `== 0.0` discard and is returned by scene.drillPick, yet
+            // is imperceptible over the raster backdrop. The tint reuses the polygon's own contour colour so
+            // any faint bleed matches the bold outline rather than introducing a new colour.
+            const CONTOUR_PICK_FILL_ALPHA = 0.01;
+            // Prefer the outline colour (what createPolylineFromPolygon paints the visible contour with);
+            // fall back to the polygon material colour (resolved the same way polygonIsFilled does), then to
+            // a neutral. Only the alpha is overridden, so any faint interior bleed matches the contour hue.
+            const outlineColour = getPropertyValue<Color>(
+              entity.polygon.outlineColor
+            );
+            let materialColour: Color | undefined;
+            if (entity.polygon.material instanceof Color) {
+              materialColour = entity.polygon.material.getValue(
+                JulianDate.now()
+              );
+            } else if (isDefined(entity.polygon.material)) {
+              materialColour = getPropertyValue<Color>(
+                (entity.polygon.material as ColorMaterialProperty).color
+              );
+            }
+            const pickFillColour = (
+              outlineColour ??
+              materialColour ??
+              Color.LIGHTGRAY
+            ).withAlpha(CONTOUR_PICK_FILL_ALPHA);
+            entity.polygon.fill = new ConstantProperty(true);
+            entity.polygon.material = new ColorMaterialProperty(
+              new ConstantProperty(pickFillColour)
+            );
+            // The polyline is the only visible outline; suppress the polygon's own (thin) outline so nothing
+            // draws under the bold contour.
+            entity.polygon.outline = new ConstantProperty(false);
+            // Flag the entity so the selection highlight in GlobeOrmap._highlightFeature SKIPS the gray
+            // polygon-fill highlight (which would paint the whole shape — the "#435 dark square") and falls
+            // through to the polyline-highlight branch instead, highlighting the contour LINE.
+            (entity as any)._contourPickFill = true;
+            // Re-entry-safe: loadGeoJsonDataSource (above) rebuilds a FRESH GeoJsonDataSource with new
+            // entities on every (re)load, so this branch always evaluates the SOURCE polygon (alpha 0 →
+            // !polygonIsFilled) — the alpha-0.01 pick-fill set here is never re-classified as "filled" on a
+            // later cycle, so the bold contour can't be lost.
+            // Hole caveat: for a donut (multi-)polygon the pick-fill spans the whole hierarchy, so a click
+            // inside a hole still selects the feature (not empty space). Acceptable for these candidate
+            // slicks — they have no navigable holes; the fill is pick-only.
           } else if (
             polygonHasOutline(entity.polygon, now) &&
             isPolygonOnTerrain(entity.polygon, now)
