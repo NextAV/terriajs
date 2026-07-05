@@ -1,6 +1,6 @@
 import { action } from "mobx";
 import { observer } from "mobx-react";
-import { FC, useEffect, useMemo } from "react";
+import { FC, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ChartView from "../../../Charts/ChartView";
 import Result from "../../../Core/Result";
@@ -25,6 +25,28 @@ const ChartPanel: FC<ChartPanelProps> = observer(({ onHeightChange }) => {
 
   const chartView = useMemo(
     () => new ChartView(viewState.terria),
+    [viewState.terria]
+  );
+
+  const setChartXDomain = useCallback(
+    (domain: [number, number] | undefined) =>
+      viewState.terria.setBottomChartXDomain(domain),
+    [viewState.terria]
+  );
+
+  const setChartPlotFrac = useCallback(
+    (frac: [number, number] | undefined) =>
+      viewState.terria.setBottomChartPlotFrac(frac),
+    [viewState.terria]
+  );
+
+  // Clear the shared chart x-domain window + plot-frac when the panel unmounts,
+  // so a stale zoom/gutter can't linger and mis-inset a later scrubber.
+  useEffect(
+    () => () => {
+      viewState.terria.setBottomChartXDomain(undefined);
+      viewState.terria.setBottomChartPlotFrac(undefined);
+    },
     [viewState.terria]
   );
 
@@ -79,9 +101,11 @@ const ChartPanel: FC<ChartPanelProps> = observer(({ onHeightChange }) => {
         chartItems={chartItems}
         xAxis={xAxis}
         height={CHART_PANEL_HEIGHT - CHART_LEGEND_HEIGHT}
+        onXDomainChange={setChartXDomain}
+        onPlotFracChange={setChartPlotFrac}
       />
     );
-  }, [chartItems, xAxis, viewState.terria]);
+  }, [chartItems, xAxis, viewState.terria, setChartXDomain, setChartPlotFrac]);
 
   if (chartItems.length === 0) {
     return null;

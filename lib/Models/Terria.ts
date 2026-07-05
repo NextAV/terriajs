@@ -627,6 +627,43 @@ export default class Terria {
 
   @observable isWorkflowPanelActive = false;
 
+  /**
+   * The bottom-dock chart's current x-axis (time) window as `[startMs, stopMs]`
+   * epoch-ms, or `undefined` when the chart is NOT zoomed. Written by `ChartPanel`
+   * on a d3 wheel-zoom/pan of the chart; read by a tenant timeline widget that
+   * wants its scrubber to follow the chart's zoom (e.g. a discrete tick-rail).
+   * A UI-transient bridge only — nothing persists it; `undefined` = full range.
+   * `.ref` because the tuple is replaced wholesale, never mutated in place.
+   */
+  @observable.ref
+  bottomChartXDomain: [number, number] | undefined = undefined;
+
+  @action
+  setBottomChartXDomain(domain: [number, number] | undefined) {
+    this.bottomChartXDomain = domain;
+  }
+
+  /**
+   * The bottom-dock chart's plot-area horizontal extent as `[leftFrac,
+   * rightFrac]` — the fractions of the chart's OWN width at which the plotted
+   * data region starts and ends. The chart insets its plot area on the left by
+   * the y-axis label gutter (`margin.left + estimatedYAxesWidth`) and on the
+   * right by `margin.right`, so a d3-zoomed x-domain corresponds to the plot
+   * edges, NOT the chart edges. A scrubber that wants to PIXEL-align its ticks
+   * to the chart (e.g. the discrete tick-rail following the chart zoom) reads
+   * this to inset its `ratio` positions into the same plot band instead of
+   * spanning its full width. `undefined` = no info / treat as full width.
+   * Written by `ChartPanel` alongside `bottomChartXDomain`; a UI-transient
+   * bridge only. `.ref` because the tuple is replaced wholesale.
+   */
+  @observable.ref
+  bottomChartPlotFrac: [number, number] | undefined = undefined;
+
+  @action
+  setBottomChartPlotFrac(frac: [number, number] | undefined) {
+    this.bottomChartPlotFrac = frac;
+  }
+
   /** Gets or sets the active SelectableDimensionWorkflow, if defined, then the workflow will be displayed using `WorkflowPanel` */
   @observable
   selectableDimensionWorkflow?: SelectableDimensionWorkflow;

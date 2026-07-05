@@ -36,10 +36,21 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
 
   width?: number;
   margin?: Margin;
+  onXDomainChange?: (domain: [number, number] | undefined) => void;
+  onPlotFracChange?: (frac: [number, number] | undefined) => void;
 }
 
 const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
-  ({ chartItems, xAxis, parentWidth = 0, width, height, margin }) => {
+  ({
+    chartItems,
+    xAxis,
+    parentWidth = 0,
+    width,
+    height,
+    margin,
+    onXDomainChange,
+    onPlotFracChange
+  }) => {
     return (
       <Chart
         chartItems={chartItems}
@@ -47,6 +58,8 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         height={height}
         margin={margin}
         width={Math.max(CHART_MIN_WIDTH, width || parentWidth)}
+        onXDomainChange={onXDomainChange}
+        onPlotFracChange={onPlotFracChange}
       />
     );
   }
@@ -63,6 +76,23 @@ interface ChartProps {
   width: number;
   height: number;
   margin?: Margin;
+  /**
+   * Fired with the chart's current d3 x-domain `[startMs, stopMs]` on a
+   * wheel-zoom/pan (time axis only; `undefined` on reset). The caller MUST
+   * pass a STABLE (memoized) callback — an inline arrow is a new function
+   * identity every render, which re-fires the reset `useEffect` (keyed on
+   * `onXDomainChange`) and clears the zoom. `ChartPanel` uses `useCallback`.
+   */
+  onXDomainChange?: (domain: [number, number] | undefined) => void;
+  /**
+   * Fired with the chart's plot-area extent `[leftFrac, rightFrac]` (fractions
+   * of the chart width where the plotted region begins/ends), or `undefined`
+   * for a non-time chart. Lets a scrubber pixel-align to the plot band rather
+   * than the chart edges. As with `onXDomainChange`, the caller MUST pass a
+   * STABLE (memoized) callback — an inline arrow re-fires the publishing
+   * `useEffect` (which lists `onPlotFracChange` in its deps) every render.
+   */
+  onPlotFracChange?: (frac: [number, number] | undefined) => void;
 }
 
 const Chart: React.FC<ChartProps> = observer(
@@ -71,7 +101,9 @@ const Chart: React.FC<ChartProps> = observer(
     xAxis,
     width,
     height,
-    margin = DEFAULT_MARGIN
+    margin = DEFAULT_MARGIN,
+    onXDomainChange,
+    onPlotFracChange
   }) => {
     const [zoomedXScale, setZoomedXScale] = useState<XScale | undefined>(
       undefined
@@ -129,6 +161,15 @@ const Chart: React.FC<ChartProps> = observer(
       }),
       [estimatedYAxesWidth, margin]
     );
+
+    // Plot-area extent as fractions of the chart's own width: the left gutter
+    // is `adjustedMargin.left` (margin.left + the y-axis label width), the
+    // right edge is `adjustedMargin.left + plotWidth`. A scrubber that follows
+    // the chart's zoom reads these (via `onPlotFracChange` → Terria) to inset
+    // its ticks into the same plot band, so a date on the rail lines up with
+    // the same date on the chart. Fall back to [0, 1] if width isn't measured.
+    const leftFrac = width > 0 ? adjustedMargin.left / width : 0;
+    const rightFrac = width > 0 ? (adjustedMargin.left + plotWidth) / width : 1;
 
     const initialXScale: XScale = useMemo(() => {
       const params = {
@@ -217,7 +258,20 @@ const Chart: React.FC<ChartProps> = observer(
 
     useEffect(() => {
       setZoomedXScale(undefined);
-    }, [processedChartItems]);
+      onXDomainChange?.(undefined);
+    }, [processedChartItems, onXDomainChange]);
+
+    // Publish the plot-area fractions for a plot-aligned scrubber. Done in an
+    // effect (not during render) to avoid a mobx write-in-render when the
+    // callback sets a Terria observable. Only a TIME-axis chart publishes a
+    // band — this gate is correct because the al-shaheen SAR detections chart
+    // is backend-configured `xAxisColumn: "date"` (a time scale); a linear-x
+    // chart intentionally publishes `undefined` (no window/frac to align to).
+    useEffect(() => {
+      onPlotFracChange?.(
+        xAxis.scale === "time" ? [leftFrac, rightFrac] : undefined
+      );
+    }, [leftFrac, rightFrac, xAxis.scale, onPlotFracChange]);
 
     if (processedChartItems.length === 0)
       return <div className={Styles.empty}>No data available</div>;
@@ -233,7 +287,13 @@ const Chart: React.FC<ChartProps> = observer(
         ]}
         // Wrap setZoomedXScale in a function to ensure React stores the D3 scale function as a value.
         // If passed directly, React treats functions as state updaters, causing zoom to break.
-        onZoom={(xScale) => setZoomedXScale(() => xScale)}
+        onZoom={(newXScale) => {
+          setZoomedXScale(() => newXScale);
+          if (onXDomainChange && xAxis.scale === "time") {
+            const dom = newXScale.domain();
+            onXDomainChange([Number(dom[0]), Number(dom[1])]);
+          }
+        }}
       >
         <Legends width={plotWidth} chartItems={processedChartItems} />
         <div style={{ position: "relative" }}>
