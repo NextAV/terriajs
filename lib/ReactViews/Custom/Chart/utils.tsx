@@ -111,6 +111,14 @@ export const Plot = memo(
                 />
               );
             }
+            default: {
+              // Exhaustiveness guard: every ChartItemType must have a case above.
+              // If a new type is added to the union without a case here, this
+              // assignment fails the build (chartItem.type is no longer `never`),
+              // turning a silent "renders nothing" into a compile error.
+              const _exhaustive: never = chartItem.type;
+              return _exhaustive;
+            }
           }
         })}
       </>

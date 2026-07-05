@@ -80,6 +80,41 @@ describe("BarChart", function () {
     expect(box[0].height).toBeCloseTo((2 / 5) * PLOT_BOTTOM, 5);
   });
 
+  it("renders a zero-count point as a zero-height bar (present in the DOM, invisible)", function () {
+    // A day with 0 candidates maps to the baseline: height 0. It must still emit a
+    // rect (so the rect-count stays aligned with the point-count in doZoom) — it is
+    // simply invisible. Documents the behaviour so a future y-domain-floor change
+    // that would change it is caught.
+    const zeroPoints = [
+      { x: new Date("2026-02-01"), y: 0 },
+      { x: new Date("2026-02-02"), y: 4 }
+    ];
+    const zeroProps = {
+      id: "zerobar",
+      chartItem: { ...chartItem, points: zeroPoints },
+      scales: {
+        x: scaleTime({
+          domain: [zeroPoints[0].x, zeroPoints[1].x],
+          range: [0, 30]
+        }),
+        y: scaleLinear({ domain: [0, 4], range: [PLOT_BOTTOM, 0] })
+      }
+    };
+    const { container } = render(
+      <svg>
+        <BarChart {...zeroProps} />
+      </svg>
+    );
+    const rects = Array.from(
+      container.querySelectorAll<SVGRectElement>("#zerobar rect")
+    );
+    expect(rects.length).toBe(2);
+    expect(parseFloat(rects[0].getAttribute("height") ?? "NaN")).toBeCloseTo(
+      0,
+      5
+    );
+  });
+
   it("gives all bars the same (non-overlapping) width", function () {
     const { container } = render(
       <svg>

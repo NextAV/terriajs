@@ -37,6 +37,8 @@ function computeBarWidth(
   let minGap = Infinity;
   for (let i = 1; i < xs.length; i++) {
     const gap = xs[i] - xs[i - 1];
+    // `gap > 0` intentionally excludes coincident pixels (two points that zoom
+    // collapses onto the same x), which would otherwise yield a zero-width bar.
     if (gap > 0 && gap < minGap) minGap = gap;
   }
   if (!Number.isFinite(minGap)) return FALLBACK_BAR_WIDTH;
@@ -76,12 +78,18 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
           const width = computeBarWidth(bars, zoomed.x);
           bars.forEach((p, i) => {
             const cx = zoomed.x(p.x);
+            // Under X-only zoom a point that was finite at initial render stays
+            // finite, so this is defensive only; if it ever hits, the bar keeps its
+            // prior x/width (index alignment is preserved) rather than getting NaN.
             if (!Number.isFinite(cx)) return;
             rects[i].setAttribute("x", String(cx - width / 2));
             rects[i].setAttribute("width", String(width));
           });
         }
       }),
+      // Includes `scales` (unlike LineChart's [id, chartItem]) because `bars` is
+      // filtered through scales.x — the handle must rebuild if the scale changes so
+      // the rect node order stays aligned with `bars`.
       [id, bars, scales]
     );
 

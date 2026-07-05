@@ -218,6 +218,17 @@ describe("GeoJsonCatalogItemSpec", () => {
           // gray fill and highlights the contour line instead.
           expect(entity.polygon).toBeDefined();
           expect(entity.polygon?.fill?.getValue(JulianDate.now())).toBe(true);
+          // The fill must stay (near-)invisible: Cesium discards alpha 0 in the pick
+          // pass, so 0.01 is the smallest pickable alpha. Lock alpha < 0.05 so a
+          // future "make it prettier" edit can't raise it into a visible fill (the
+          // #435 dark square) while still satisfying the fill === true assertion.
+          const material = entity.polygon?.material as unknown as {
+            color?: {
+              getValue: (t: JulianDate) => { alpha: number } | undefined;
+            };
+          };
+          const fillColour = material?.color?.getValue(JulianDate.now());
+          expect(fillColour?.alpha).toBeLessThan(0.05);
           expect(
             (entity as unknown as { _contourPickFill?: boolean })
               ._contourPickFill
