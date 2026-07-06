@@ -9,16 +9,21 @@ interface Props {
   translateExtent: [[number, number], [number, number]];
   /**
    * Viewport extent of the zoom, in the surface's coordinate space. Pass the
-   * chart's own box (and the same value as `translateExtent`) so d3's
-   * constraint forces the identity transform at scale k=1: a wheel zoom-out
-   * then always lands EXACTLY back on the initial view. Without it d3 derives
-   * the extent from the owner SVG while `translateExtent` ran to Infinity, so
-   * a zoom-out anchored away from where the zoom-in happened settled at k=1
-   * with a residual translate — the chart stuck panned into empty space past
-   * the data, with no gesture able to bring it home (reported 2026-07-06 as
-   * the bottom-chart/scrubber de-sync on al-shaheen; the defect itself is
-   * tenant-agnostic). Optional: when absent, d3's default extent is used —
-   * the pre-existing behaviour.
+   * chart's own box AND THE SAME VALUE as `translateExtent` — d3's constraint
+   * forces the identity transform at scale k=1 only when the two boxes are
+   * identical; let them diverge and a zoom-out silently stops returning to
+   * the initial view (the original bug re-emerges). With them identical, a
+   * wheel zoom-out always lands EXACTLY back on the initial view. Previously
+   * d3 derived the extent from the owner SVG while `translateExtent` ran to
+   * Infinity, so a zoom-out anchored away from where the zoom-in happened
+   * settled at k=1 with a residual translate — the chart stuck panned into
+   * empty space past the data, and under the UNBOUNDED extents no gesture
+   * re-constrained it (reported 2026-07-06 as the bottom-chart/scrubber
+   * de-sync on al-shaheen; the defect itself is tenant-agnostic). A stale
+   * out-of-bounds transform surviving from before this fix self-heals on the
+   * user's next zoom gesture — re-binding preserves the node's `__zoom`, and
+   * the new constraint applies when the gesture fires. Optional: when
+   * absent, d3's default extent is used — the pre-existing behaviour.
    */
   extent?: [[number, number], [number, number]];
   children: ReactNode;

@@ -317,6 +317,10 @@ const Chart: React.FC<ChartProps> = observer(
     // chart↔scrubber de-sync; the defect itself is tenant-agnostic). Guarded:
     // an unmeasured/degenerate layout falls back to the unbounded behaviour
     // rather than handing d3 a negative extent.
+    // LOAD-BEARING: `extent` and `translateExtent` MUST stay the SAME box —
+    // both are `zoomBox` below on purpose. d3 forces identity at k=1 only
+    // when the two are identical; hand them different values and zoom-out
+    // silently stops returning to the initial view (the original bug).
     const zoomBounded = plotWidth > 0 && plotHeight > 0;
     const zoomBox: [[number, number], [number, number]] = [
       [0, 0],
