@@ -77,18 +77,22 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       ref,
       () => ({
         doZoom(zoomed) {
-          // Two rects per bar: the visible bar + a full-height transparent HIT area
-          // (so a thin bar is still easy to click). Select each class separately so
-          // the index alignment with `bars` holds.
+          // The visible bars always re-x on zoom. The full-height transparent HIT
+          // rects (one per bar, for easy clicking) exist ONLY when the chart is
+          // clickable — so gate their count check on `clickable`, or a non-clickable
+          // bar chart (hit.length === 0) would fail the guard and freeze the visible
+          // bars' zoom too.
           const vis = document.querySelectorAll<SVGRectElement>(
             `#${id} rect.bar-vis`
           );
-          const hit = document.querySelectorAll<SVGRectElement>(
-            `#${id} rect.bar-hit`
-          );
           // A mismatch means the DOM is mid-rebuild; skip this frame rather than
           // mis-assign widths across bars.
-          if (vis.length !== bars.length || hit.length !== bars.length) return;
+          if (vis.length !== bars.length) return;
+          const clickable = typeof chartItem.onClick === "function";
+          const hit = clickable
+            ? document.querySelectorAll<SVGRectElement>(`#${id} rect.bar-hit`)
+            : null;
+          if (hit && hit.length !== bars.length) return;
           const width = computeBarWidth(bars, zoomed.x);
           const hitW = hitWidthFor(width);
           bars.forEach((p, i) => {
@@ -99,15 +103,18 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
             if (!Number.isFinite(cx)) return;
             vis[i].setAttribute("x", String(cx - width / 2));
             vis[i].setAttribute("width", String(width));
-            hit[i].setAttribute("x", String(cx - hitW / 2));
-            hit[i].setAttribute("width", String(hitW));
+            if (hit) {
+              hit[i].setAttribute("x", String(cx - hitW / 2));
+              hit[i].setAttribute("width", String(hitW));
+            }
           });
         }
       }),
       // Includes `scales` (unlike LineChart's [id, chartItem]) because `bars` is
       // filtered through scales.x — the handle must rebuild if the scale changes so
-      // the rect node order stays aligned with `bars`.
-      [id, bars, scales]
+      // the rect node order stays aligned with `bars`; and `chartItem` because
+      // doZoom now branches on `chartItem.onClick` (whether hit rects exist).
+      [id, bars, scales, chartItem]
     );
 
     const fill = color || chartItem.getColor();

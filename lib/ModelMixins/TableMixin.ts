@@ -450,6 +450,9 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
                       const clickMs =
                         raw instanceof Date ? raw.getTime() : Number(raw);
                       if (!isFinite(clickMs)) return;
+                      // Shape mirrors DiscretelyTimeVaryingMixin's
+                      // `discreteTimesAsSortedJulianDates: AsJulian[]` (AsJulian.time
+                      // is a JulianDate); hand-typed to avoid a mixin import cycle.
                       const driver = this.terria.timelineStack?.top as
                         | {
                             discreteTimesAsSortedJulianDates?: {
@@ -459,23 +462,22 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
                         | undefined;
                       const discretes =
                         driver?.discreteTimesAsSortedJulianDates;
+                      // No timeline driver / no discrete instants → there is no
+                      // slider to move; leave the clock where it is rather than
+                      // jumping to a synthetic midnight timestamp.
+                      if (!discretes || !discretes.length) return;
                       let target: JulianDate | undefined;
-                      if (discretes && discretes.length) {
-                        let bestDiff = Infinity;
-                        for (const d of discretes) {
-                          const diff = Math.abs(
-                            JulianDate.toDate(d.time).getTime() - clickMs
-                          );
-                          if (diff < bestDiff) {
-                            bestDiff = diff;
-                            target = d.time;
-                          }
+                      let bestDiff = Infinity;
+                      for (const d of discretes) {
+                        const diff = Math.abs(
+                          JulianDate.toDate(d.time).getTime() - clickMs
+                        );
+                        if (diff < bestDiff) {
+                          bestDiff = diff;
+                          target = d.time;
                         }
                       }
-                      if (!target) {
-                        target = JulianDate.fromDate(new Date(clickMs));
-                      }
-                      if (this.terria.timelineClock) {
+                      if (target && this.terria.timelineClock) {
                         this.terria.timelineClock.currentTime = target;
                         this.terria.timelineClock.shouldAnimate = false;
                       }
