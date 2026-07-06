@@ -233,6 +233,19 @@ describe("GeoJsonCatalogItemSpec", () => {
             (entity as unknown as { _contourPickFill?: boolean })
               ._contourPickFill
           ).toBe(true);
+          // The pick-fill is a REGULAR (non-ground) primitive so the standard depth
+          // pick returns it AT ANY SIZE — a small CLAMP_TO_GROUND (draped) fill is
+          // picked via a shadow-volume classification primitive whose depth precision
+          // fails on small polygons (only a huge draped fill is reliably picked, which
+          // is why a full-AOI boundary shadowed the small slicks that were themselves
+          // never pickable). HeightReference.NONE === 0; lifted a few metres so it wins
+          // the depth test over the coplanar surface imagery in the pick pass.
+          expect(
+            entity.polygon?.heightReference?.getValue(JulianDate.now())
+          ).toBe(0);
+          expect(
+            entity.polygon?.height?.getValue(JulianDate.now())
+          ).toBeGreaterThan(0);
         });
       });
 
