@@ -231,16 +231,38 @@ const Chart: React.FC<ChartProps> = observer(
 
     // Permanent vertical marker at the timeline clock's selected time (opt-in
     // via `selectedTimeMs`; time axis only). `xScale` maps epoch-ms → plot-px
-    // (scaleTime accepts a number). Rendered only when it lands inside the plot
-    // band so a clock time outside the data doesn't draw a marker on the edge.
+    // (scaleTime accepts a number). The selected time is a detection INSTANT
+    // (carries a time-of-day), but a daily chart's domain-max is the last bar's
+    // date at MIDNIGHT — so the marker for the LATEST date lands up to ~1 day
+    // past the right edge and, under a strict `<= plotWidth` guard, was hidden
+    // at the default (latest-date) view. Show the marker whenever the selected
+    // time is within the data's date range inclusive of the last date's full
+    // day (a 1-day grace at each bound), and CLAMP its x into the plot band so a
+    // within-a-day instant pins to the nearest edge rather than vanishing. A
+    // clock time genuinely outside the data (> a day past either bound) still
+    // draws no marker.
     const selectedX =
       selectedTimeMs != null &&
       Number.isFinite(selectedTimeMs) &&
       xAxis.scale === "time"
         ? xScale(selectedTimeMs)
         : undefined;
-    const showSelectedMarker =
-      selectedX != null && selectedX >= 0 && selectedX <= plotWidth;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const [domainMinMs, domainMaxMs] =
+      xAxis.scale === "time"
+        ? calculateDomainX(processedChartItems)
+        : [NaN, NaN];
+    const selectedInRange =
+      selectedTimeMs != null &&
+      Number.isFinite(selectedTimeMs) &&
+      Number.isFinite(domainMinMs) &&
+      Number.isFinite(domainMaxMs) &&
+      selectedTimeMs >= domainMinMs - DAY_MS &&
+      selectedTimeMs <= domainMaxMs + DAY_MS;
+    const showSelectedMarker = selectedX != null && selectedInRange;
+    const selectedMarkerX = showSelectedMarker
+      ? Math.min(plotWidth, Math.max(0, selectedX))
+      : undefined;
 
     const tooltip = useMemo(() => {
       const margin = adjustedMargin;
@@ -401,7 +423,7 @@ const Chart: React.FC<ChartProps> = observer(
                 />
                 {showSelectedMarker && (
                   <Cursor
-                    x={selectedX!}
+                    x={selectedMarkerX!}
                     stroke="#ffffff"
                     strokeWidth={2}
                     strokeOpacity={0.95}
