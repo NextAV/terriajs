@@ -89,20 +89,29 @@ const ChartPanel: FC<ChartPanelProps> = observer(
     //   chartableItems.length > 0 &&
     //   chartableItems[chartableItems.length - 1].isLoading;
 
-    // Live selected date (opt-in, al-shaheen): epoch-ms + a YYYY-MM-DD label from
-    // the timeline clock. Reading `currentTime` in this observer makes the header
-    // label + the chart's permanent marker reactive to every scrub. undefined
-    // when not opted in → the stock "Charts" label + no marker (byte-identical).
+    // Live selected date (opt-in, al-shaheen): epoch-ms + a YYYY-MM-DD label.
+    // Source MUST be the MobX-observable timeline time — the DRIVER item's
+    // `currentTimeAsJulianDate` (a `@computed` on DiscretelyTimeVaryingMixin,
+    // and the same reactive source the discrete scrubber tracks) — NOT
+    // `terria.timelineClock.currentTime`. `timelineClock` is a plain Cesium
+    // `Clock` (Terria.ts: `new Clock(...)`); its `currentTime` is NOT a MobX
+    // observable, so reading it in this observer creates no reactive
+    // dependency: the header label refreshes only when some OTHER observable
+    // happens to re-render ChartPanel (flaky — it can stay on the previous
+    // date/"Charts" through a scrub), and the memoized `BottomDockChart` never
+    // re-runs with a fresh `selectedTimeMs`, so the permanent marker never
+    // draws at all. Reading `timelineStack.top.currentTimeAsJulianDate` makes
+    // both the header AND the marker update on every scrub.
     // NOTE: the label is UTC (`toISOString`), matching how the chart's time axis
     // + the discrete scrubber read the (UTC) detection instants — so the header
     // date and the marker agree on the same calendar day for a UTC-instant tenant
     // like al-shaheen. A tenant whose instants sit near a UTC midnight boundary in
     // a non-UTC display would want a locale-aware format before opting in.
+    const selectedJulianDate =
+      viewState.terria.timelineStack.top?.currentTimeAsJulianDate;
     const selectedTimeMs =
-      showSelectedDate && viewState.terria.timelineClock?.currentTime
-        ? JulianDate.toDate(
-            viewState.terria.timelineClock.currentTime
-          ).getTime()
+      showSelectedDate && selectedJulianDate
+        ? JulianDate.toDate(selectedJulianDate).getTime()
         : undefined;
     const selectedDateLabel =
       selectedTimeMs !== undefined && Number.isFinite(selectedTimeMs)
