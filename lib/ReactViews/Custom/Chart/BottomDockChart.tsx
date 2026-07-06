@@ -38,6 +38,15 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
   margin?: Margin;
   onXDomainChange?: (domain: [number, number] | undefined) => void;
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
+  /**
+   * Optional epoch-ms of the timeline clock's currently-SELECTED time. When
+   * provided (and the x-axis is time), the chart draws a PERMANENT vertical
+   * marker at that date — always visible, distinct from the transient hover
+   * cursor — so the user can see which date the bottom time slider is on
+   * against the bars. `undefined` (every caller that doesn't pass it) → no
+   * marker, byte-identical to before.
+   */
+  selectedTimeMs?: number;
 }
 
 const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
@@ -49,7 +58,8 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
     height,
     margin,
     onXDomainChange,
-    onPlotFracChange
+    onPlotFracChange,
+    selectedTimeMs
   }) => {
     return (
       <Chart
@@ -60,6 +70,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         width={Math.max(CHART_MIN_WIDTH, width || parentWidth)}
         onXDomainChange={onXDomainChange}
         onPlotFracChange={onPlotFracChange}
+        selectedTimeMs={selectedTimeMs}
       />
     );
   }
@@ -93,6 +104,8 @@ interface ChartProps {
    * `useEffect` (which lists `onPlotFracChange` in its deps) every render.
    */
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
+  /** Epoch-ms of the selected timeline time → a permanent vertical marker. */
+  selectedTimeMs?: number;
 }
 
 const Chart: React.FC<ChartProps> = observer(
@@ -103,7 +116,8 @@ const Chart: React.FC<ChartProps> = observer(
     height,
     margin = DEFAULT_MARGIN,
     onXDomainChange,
-    onPlotFracChange
+    onPlotFracChange,
+    selectedTimeMs
   }) => {
     const [zoomedXScale, setZoomedXScale] = useState<XScale | undefined>(
       undefined
@@ -214,6 +228,19 @@ const Chart: React.FC<ChartProps> = observer(
       pointsNearMouse.length > 0
         ? xScale(pointsNearMouse[0].point.x)
         : mouseCoords?.x;
+
+    // Permanent vertical marker at the timeline clock's selected time (opt-in
+    // via `selectedTimeMs`; time axis only). `xScale` maps epoch-ms → plot-px
+    // (scaleTime accepts a number). Rendered only when it lands inside the plot
+    // band so a clock time outside the data doesn't draw a marker on the edge.
+    const selectedX =
+      selectedTimeMs != null &&
+      Number.isFinite(selectedTimeMs) &&
+      xAxis.scale === "time"
+        ? xScale(selectedTimeMs)
+        : undefined;
+    const showSelectedMarker =
+      selectedX != null && selectedX >= 0 && selectedX <= plotWidth;
 
     const tooltip = useMemo(() => {
       const margin = adjustedMargin;
@@ -343,6 +370,14 @@ const Chart: React.FC<ChartProps> = observer(
                   height={plotHeight}
                   fill="transparent"
                 />
+                {showSelectedMarker && (
+                  <Cursor
+                    x={selectedX!}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    strokeOpacity={0.95}
+                  />
+                )}
                 {cursorX && <Cursor x={cursorX} stroke={DEFAULT_GRID_COLOR} />}
                 <Plot
                   chartItems={processedChartItems}
