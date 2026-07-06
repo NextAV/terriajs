@@ -45,6 +45,14 @@ function computeBarWidth(
   return Math.min(MAX_BAR_WIDTH, Math.max(1, minGap * BAR_FILL_FRACTION));
 }
 
+// The transparent click hit area is a bit wider than the visible bar (min ~10px) so a
+// thin bar is still an easy click target, without widening the bar's visual footprint.
+// `barWidth / BAR_FILL_FRACTION` recovers ~the full inter-bar gap (the bar fills that
+// fraction of it), giving a per-date "column" hit target.
+function hitWidthFor(barWidth: number): number {
+  return Math.max(barWidth / BAR_FILL_FRACTION, 10);
+}
+
 /**
  * Vertical-bar renderer for discrete per-x counts (e.g. candidate detections per date).
  * A line implies continuity between samples that discrete daily counts don't have; bars
@@ -69,21 +77,30 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       ref,
       () => ({
         doZoom(zoomed) {
-          const rects = document.querySelectorAll<SVGRectElement>(
-            `#${id} rect`
+          // Two rects per bar: the visible bar + a full-height transparent HIT area
+          // (so a thin bar is still easy to click). Select each class separately so
+          // the index alignment with `bars` holds.
+          const vis = document.querySelectorAll<SVGRectElement>(
+            `#${id} rect.bar-vis`
+          );
+          const hit = document.querySelectorAll<SVGRectElement>(
+            `#${id} rect.bar-hit`
           );
           // A mismatch means the DOM is mid-rebuild; skip this frame rather than
           // mis-assign widths across bars.
-          if (rects.length !== bars.length) return;
+          if (vis.length !== bars.length || hit.length !== bars.length) return;
           const width = computeBarWidth(bars, zoomed.x);
+          const hitW = hitWidthFor(width);
           bars.forEach((p, i) => {
             const cx = zoomed.x(p.x);
             // Under X-only zoom a point that was finite at initial render stays
             // finite, so this is defensive only; if it ever hits, the bar keeps its
             // prior x/width (index alignment is preserved) rather than getting NaN.
             if (!Number.isFinite(cx)) return;
-            rects[i].setAttribute("x", String(cx - width / 2));
-            rects[i].setAttribute("width", String(width));
+            vis[i].setAttribute("x", String(cx - width / 2));
+            vis[i].setAttribute("width", String(width));
+            hit[i].setAttribute("x", String(cx - hitW / 2));
+            hit[i].setAttribute("width", String(hitW));
           });
         }
       }),
@@ -100,6 +117,15 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
     // small-count bar is never clipped to zero height by a non-zero domain minimum.
     const [r0, r1] = scales.y.range();
     const baseline = Math.max(r0, r1);
+    const plotTop = Math.min(r0, r1);
+    const plotHeight = Math.abs(r0 - r1);
+    const hitW = hitWidthFor(width);
+    // A bar chart of a time series is clickable — the chart item's onClick (set by
+    // TableMixin for `chartType:"bar"`) scrubs the timeline to the bar's date.
+    const onBarClick =
+      typeof chartItem.onClick === "function"
+        ? (p: ChartPoint) => chartItem.onClick(p)
+        : undefined;
 
     return (
       <g id={id}>
@@ -107,14 +133,33 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
           const cx = scales.x(p.x);
           const top = scales.y(p.y);
           return (
-            <rect
+            <g
               key={i}
-              x={cx - width / 2}
-              y={Math.min(top, baseline)}
-              width={width}
-              height={Math.abs(baseline - top)}
-              fill={fill}
-            />
+              onClick={onBarClick ? () => onBarClick(p) : undefined}
+              style={onBarClick ? { cursor: "pointer" } : undefined}
+            >
+              {/* Full-height transparent hit area so a thin bar is easy to click.
+                  Rendered only when clickable so it never intercepts hover/zoom on a
+                  non-interactive bar chart. */}
+              {onBarClick && (
+                <rect
+                  className="bar-hit"
+                  x={cx - hitW / 2}
+                  y={plotTop}
+                  width={hitW}
+                  height={plotHeight}
+                  fill="transparent"
+                />
+              )}
+              <rect
+                className="bar-vis"
+                x={cx - width / 2}
+                y={Math.min(top, baseline)}
+                width={width}
+                height={Math.abs(baseline - top)}
+                fill={fill}
+              />
+            </g>
           );
         })}
       </g>

@@ -432,7 +432,56 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
             },
             pointOnMap: isLatLonHeight(this.chartPointOnMap)
               ? this.chartPointOnMap
-              : undefined
+              : undefined,
+            // For a "bar" time-series chart (e.g. per-date detection counts),
+            // clicking a bar scrubs the GLOBAL timeline to that bar's date so the
+            // slider + any time-aware map layers jump there. The chart's x is a
+            // per-DATE value (often midnight), but the timeline's discrete instants
+            // carry a time-of-day — so SNAP to the timeline driver's NEAREST
+            // discrete instant, otherwise a midnight click can land between a
+            // date's actual detection instants and activate nothing. Only wired for
+            // bar charts; a line chart's onClick stays undefined (unchanged).
+            onClick:
+              this.chartType === "bar"
+                ? (point: { x?: Date | number }) => {
+                    runInAction(() => {
+                      const raw = point?.x;
+                      if (raw == null) return;
+                      const clickMs =
+                        raw instanceof Date ? raw.getTime() : Number(raw);
+                      if (!isFinite(clickMs)) return;
+                      const driver = this.terria.timelineStack?.top as
+                        | {
+                            discreteTimesAsSortedJulianDates?: {
+                              time: JulianDate;
+                            }[];
+                          }
+                        | undefined;
+                      const discretes =
+                        driver?.discreteTimesAsSortedJulianDates;
+                      let target: JulianDate | undefined;
+                      if (discretes && discretes.length) {
+                        let bestDiff = Infinity;
+                        for (const d of discretes) {
+                          const diff = Math.abs(
+                            JulianDate.toDate(d.time).getTime() - clickMs
+                          );
+                          if (diff < bestDiff) {
+                            bestDiff = diff;
+                            target = d.time;
+                          }
+                        }
+                      }
+                      if (!target) {
+                        target = JulianDate.fromDate(new Date(clickMs));
+                      }
+                      if (this.terria.timelineClock) {
+                        this.terria.timelineClock.currentTime = target;
+                        this.terria.timelineClock.shouldAnimate = false;
+                      }
+                    });
+                  }
+                : undefined
           };
         })
       );
