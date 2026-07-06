@@ -1185,6 +1185,12 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
               // scene.drillPick, yet is imperceptible over the raster backdrop. The tint reuses the
               // polygon's own contour colour so any faint bleed matches the bold outline.
               const CONTOUR_PICK_FILL_ALPHA = 0.01;
+              // A few metres of lift for the invisible pick-fill (see below) so it wins the depth test
+              // against the coplanar surface imagery/backdrop in the pick pass. Imperceptible at a
+              // near-nadir web-map view; at a steep oblique tilt the invisible fill projects slightly
+              // INSIDE the visible clamped contour, which is fine — the interior is the intended click
+              // target and the contour line is the visible affordance.
+              const CONTOUR_PICK_FILL_HEIGHT_M = 5;
               // Prefer the outline colour (what createPolylineFromPolygon paints the visible contour
               // with); fall back to the polygon material colour (resolved the same way polygonIsFilled
               // does), then to a neutral. Only the alpha is overridden.
@@ -1213,6 +1219,32 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
               // The polyline is the only visible outline; suppress the polygon's own (thin) outline so
               // nothing draws under the bold contour.
               entity.polygon.outline = new ConstantProperty(false);
+              // Make the pick-fill a REGULAR (non-ground) primitive so the whole interior is reliably
+              // pickable AT ANY SIZE. A CLAMP_TO_GROUND (draped) polygon is picked via a shadow-volume
+              // ClassificationPrimitive whose depth precision fails on SMALL polygons — the pick ray
+              // misses a thin feature. Only a LARGE draped polygon (e.g. a full-AOI frame) is reliably
+              // picked that way, which is exactly why an AOI-boundary pick-fill shadowed the small
+              // product features while those small features were never actually pickable. The standard
+              // (non-classification) depth pick returns a translucent primitive regardless of size, so
+              // switch the pick-fill to heightReference NONE + a small absolute lift. The VISIBLE contour
+              // is unchanged: createPolylineFromPolygon ran above with the still-clamped polygon, so the
+              // bold outline stays the CLAMPED polyline — only the invisible pick target moves off the
+              // ground. (Cesium drapes imagery on the ELLIPSOID, so an ellipsoid-relative lift sits a few
+              // metres above the imagery frame everywhere in the AOI.)
+              entity.polygon.heightReference = new ConstantProperty(
+                HeightReference.NONE
+              );
+              entity.polygon.height = new ConstantProperty(
+                CONTOUR_PICK_FILL_HEIGHT_M
+              );
+              // Post-mutation invariant: this polygon now has a `height`, so
+              // `isPolygonOnTerrain(polygon)` would return false for it. That is only read by the
+              // downstream `else if` (which this branch is mutually exclusive with) — the visible
+              // polyline was already built above from the still-clamped polygon — so nothing
+              // re-clamps or re-evaluates it. A future caller that inspects this entity's terrain
+              // state must account for the lift. (Caveat for a future opt-in tenant over REAL
+              // terrain: a fixed absolute lift could tuck a large fill under a hill or float it in a
+              // valley — harmless here since the fill is pick-only and the AOI is flat sea.)
               // Flag the entity so the selection highlight in GlobeOrMap._highlightFeature SKIPS the gray
               // polygon-fill highlight (which would paint the whole shape — the "#435 dark square") and
               // falls through to the polyline-highlight branch, highlighting the contour LINE.
