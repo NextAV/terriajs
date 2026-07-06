@@ -107,12 +107,16 @@ const ChartPanel: FC<ChartPanelProps> = observer(
     // date and the marker agree on the same calendar day for a UTC-instant tenant
     // like al-shaheen. A tenant whose instants sit near a UTC midnight boundary in
     // a non-UTC display would want a locale-aware format before opting in.
-    const selectedJulianDate =
-      viewState.terria.timelineStack.top?.currentTimeAsJulianDate;
-    const selectedTimeMs =
-      showSelectedDate && selectedJulianDate
-        ? JulianDate.toDate(selectedJulianDate).getTime()
-        : undefined;
+    // Gate the reactive read on `showSelectedDate` so a NON-opted-in ChartPanel
+    // (every tenant but al-shaheen, incl. the QE Priority-1 demo) takes no
+    // MobX dependency on the timeline time at all — provably byte-identical, not
+    // just behaviorally so (guardian #25 NIT-1).
+    const selectedJulianDate = showSelectedDate
+      ? viewState.terria.timelineStack.top?.currentTimeAsJulianDate
+      : undefined;
+    const selectedTimeMs = selectedJulianDate
+      ? JulianDate.toDate(selectedJulianDate).getTime()
+      : undefined;
     const selectedDateLabel =
       selectedTimeMs !== undefined && Number.isFinite(selectedTimeMs)
         ? new Date(selectedTimeMs).toISOString().slice(0, 10)
