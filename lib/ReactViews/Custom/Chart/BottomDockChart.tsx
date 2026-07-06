@@ -231,16 +231,47 @@ const Chart: React.FC<ChartProps> = observer(
 
     // Permanent vertical marker at the timeline clock's selected time (opt-in
     // via `selectedTimeMs`; time axis only). `xScale` maps epoch-ms → plot-px
-    // (scaleTime accepts a number). Rendered only when it lands inside the plot
-    // band so a clock time outside the data doesn't draw a marker on the edge.
+    // (scaleTime accepts a number). The selected time is a detection INSTANT
+    // (carries a time-of-day), but a daily chart's domain-max is the last bar's
+    // date at MIDNIGHT — so the marker for the LATEST date lands up to ~1 day
+    // past the right edge and, under a strict `<= plotWidth` guard, was hidden
+    // at the default (latest-date) view.
+    //
+    // Show the marker whenever the selected time is within the ACTIVE (possibly-
+    // zoomed) domain inclusive of a 1-day grace at each bound, and CLAMP its x
+    // into the plot band so a within-a-day instant pins to the nearest edge
+    // rather than vanishing. Range-checking the ACTIVE `xScale.domain()` (not the
+    // full un-zoomed data domain) is deliberate (guardian/sonnet #26): at the
+    // un-zoomed default it IS the full data domain, so the latest-date instant
+    // (≤ 1 day past the last midnight bar) shows clamped to the right edge; when
+    // the user zooms into a sub-window that EXCLUDES the selected date, the date
+    // falls outside the visible domain → the marker HIDES rather than pinning a
+    // misleading marker to an edge. A clock time genuinely > 1 day outside the
+    // visible range draws no marker.
     const selectedX =
       selectedTimeMs != null &&
       Number.isFinite(selectedTimeMs) &&
       xAxis.scale === "time"
         ? xScale(selectedTimeMs)
         : undefined;
-    const showSelectedMarker =
-      selectedX != null && selectedX >= 0 && selectedX <= plotWidth;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    // `xScale.domain()` may return Date[] or number[] (scaleTime) → coerce via
+    // Number. This reuses the already-built scale (no second `calculateDomainX`).
+    const activeDomain =
+      xAxis.scale === "time" ? xScale.domain().map(Number) : [NaN, NaN];
+    const selectedInRange =
+      selectedTimeMs != null &&
+      Number.isFinite(selectedTimeMs) &&
+      Number.isFinite(activeDomain[0]) &&
+      Number.isFinite(activeDomain[1]) &&
+      selectedTimeMs >= activeDomain[0] - DAY_MS &&
+      selectedTimeMs <= activeDomain[1] + DAY_MS;
+    // `selectedMarkerX` is defined iff the marker should render — the JSX renders
+    // on `selectedMarkerX != null` (no non-null assertion needed).
+    const selectedMarkerX =
+      selectedX != null && selectedInRange
+        ? Math.min(plotWidth, Math.max(0, selectedX))
+        : undefined;
 
     const tooltip = useMemo(() => {
       const margin = adjustedMargin;
@@ -399,9 +430,9 @@ const Chart: React.FC<ChartProps> = observer(
                   height={plotHeight}
                   fill="transparent"
                 />
-                {showSelectedMarker && (
+                {selectedMarkerX != null && (
                   <Cursor
-                    x={selectedX!}
+                    x={selectedMarkerX}
                     stroke="#ffffff"
                     strokeWidth={2}
                     strokeOpacity={0.95}
