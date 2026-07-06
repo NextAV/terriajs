@@ -303,15 +303,40 @@ const Chart: React.FC<ChartProps> = observer(
     if (processedChartItems.length === 0)
       return <div className={Styles.empty}>No data available</div>;
 
+    // Bound the zoom to the plot band so the chart can never be panned off its
+    // data. The zoom transform lives in #zoomSurface's LOCAL coordinate space
+    // (d3 reads pointer coords via the element's CTM), where the plot band is
+    // [0, plotWidth] × [0, plotHeight] — so the viewport `extent` and the
+    // world `translateExtent` are BOTH that box, and with the two identical
+    // d3's constraint forces the exact identity transform at k=1: a wheel
+    // zoom-out always settles back on the initial view. The previous
+    // [[0,0],[Infinity,Infinity]] translateExtent (+ d3's default owner-svg
+    // extent) let a zoom-out anchored away from the zoom-in point settle at
+    // k=1 with a residual translate — the chart stuck panned into empty space
+    // past the data with no gesture able to bring it home (the 2026-07-06
+    // chart↔scrubber de-sync; the defect itself is tenant-agnostic). Guarded:
+    // an unmeasured/degenerate layout falls back to the unbounded behaviour
+    // rather than handing d3 a negative extent.
+    const zoomBounded = plotWidth > 0 && plotHeight > 0;
+    const zoomBox: [[number, number], [number, number]] = [
+      [0, 0],
+      [plotWidth, plotHeight]
+    ];
+
     return (
       <ZoomX
         surface="#zoomSurface"
         initialScale={initialXScale}
         scaleExtent={[1, Infinity]}
-        translateExtent={[
-          [0, 0],
-          [Infinity, Infinity]
-        ]}
+        extent={zoomBounded ? zoomBox : undefined}
+        translateExtent={
+          zoomBounded
+            ? zoomBox
+            : [
+                [0, 0],
+                [Infinity, Infinity]
+              ]
+        }
         // Wrap setZoomedXScale in a function to ensure React stores the D3 scale function as a value.
         // If passed directly, React treats functions as state updaters, causing zoom to break.
         onZoom={(newXScale) => {
