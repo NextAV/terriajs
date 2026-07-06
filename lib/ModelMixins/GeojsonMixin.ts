@@ -1186,7 +1186,10 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
               // polygon's own contour colour so any faint bleed matches the bold outline.
               const CONTOUR_PICK_FILL_ALPHA = 0.01;
               // A few metres of lift for the invisible pick-fill (see below) so it wins the depth test
-              // against the coplanar surface imagery in the pick pass — imperceptible over the backdrop.
+              // against the coplanar surface imagery/backdrop in the pick pass. Imperceptible at a
+              // near-nadir web-map view; at a steep oblique tilt the invisible fill projects slightly
+              // INSIDE the visible clamped contour, which is fine — the interior is the intended click
+              // target and the contour line is the visible affordance.
               const CONTOUR_PICK_FILL_HEIGHT_M = 5;
               // Prefer the outline colour (what createPolylineFromPolygon paints the visible contour
               // with); fall back to the polygon material colour (resolved the same way polygonIsFilled
@@ -1234,6 +1237,14 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
               entity.polygon.height = new ConstantProperty(
                 CONTOUR_PICK_FILL_HEIGHT_M
               );
+              // Post-mutation invariant: this polygon now has a `height`, so
+              // `isPolygonOnTerrain(polygon)` would return false for it. That is only read by the
+              // downstream `else if` (which this branch is mutually exclusive with) — the visible
+              // polyline was already built above from the still-clamped polygon — so nothing
+              // re-clamps or re-evaluates it. A future caller that inspects this entity's terrain
+              // state must account for the lift. (Caveat for a future opt-in tenant over REAL
+              // terrain: a fixed absolute lift could tuck a large fill under a hill or float it in a
+              // valley — harmless here since the fill is pick-only and the AOI is flat sea.)
               // Flag the entity so the selection highlight in GlobeOrMap._highlightFeature SKIPS the gray
               // polygon-fill highlight (which would paint the whole shape — the "#435 dark square") and
               // falls through to the polyline-highlight branch, highlighting the contour LINE.

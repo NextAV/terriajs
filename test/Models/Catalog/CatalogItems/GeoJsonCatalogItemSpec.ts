@@ -242,7 +242,7 @@ describe("GeoJsonCatalogItemSpec", () => {
           // the depth test over the coplanar surface imagery in the pick pass.
           expect(
             entity.polygon?.heightReference?.getValue(JulianDate.now())
-          ).toBe(0);
+          ).toBe(HeightReference.NONE);
           expect(
             entity.polygon?.height?.getValue(JulianDate.now())
           ).toBeGreaterThan(0);
