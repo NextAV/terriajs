@@ -432,7 +432,58 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
             },
             pointOnMap: isLatLonHeight(this.chartPointOnMap)
               ? this.chartPointOnMap
-              : undefined
+              : undefined,
+            // For a "bar" time-series chart (e.g. per-date detection counts),
+            // clicking a bar scrubs the GLOBAL timeline to that bar's date so the
+            // slider + any time-aware map layers jump there. The chart's x is a
+            // per-DATE value (often midnight), but the timeline's discrete instants
+            // carry a time-of-day — so SNAP to the timeline driver's NEAREST
+            // discrete instant, otherwise a midnight click can land between a
+            // date's actual detection instants and activate nothing. Only wired for
+            // bar charts; a line chart's onClick stays undefined (unchanged).
+            onClick:
+              this.chartType === "bar"
+                ? (point: { x?: Date | number }) => {
+                    runInAction(() => {
+                      const raw = point?.x;
+                      if (raw == null) return;
+                      const clickMs =
+                        raw instanceof Date ? raw.getTime() : Number(raw);
+                      if (!isFinite(clickMs)) return;
+                      // Shape mirrors DiscretelyTimeVaryingMixin's
+                      // `discreteTimesAsSortedJulianDates: AsJulian[]` (AsJulian.time
+                      // is a JulianDate); hand-typed to avoid a mixin import cycle.
+                      const driver = this.terria.timelineStack?.top as
+                        | {
+                            discreteTimesAsSortedJulianDates?: {
+                              time: JulianDate;
+                            }[];
+                          }
+                        | undefined;
+                      const discretes =
+                        driver?.discreteTimesAsSortedJulianDates;
+                      // No timeline driver / no discrete instants → there is no
+                      // slider to move; leave the clock where it is rather than
+                      // jumping to a synthetic midnight timestamp.
+                      if (!discretes || !discretes.length) return;
+                      let target: JulianDate | undefined;
+                      let bestDiff = Infinity;
+                      for (const d of discretes) {
+                        const diff = Math.abs(
+                          JulianDate.toDate(d.time).getTime() - clickMs
+                        );
+                        if (diff < bestDiff) {
+                          bestDiff = diff;
+                          target = d.time;
+                        }
+                      }
+                      if (target && this.terria.timelineClock) {
+                        this.terria.timelineClock.currentTime = target;
+                        this.terria.timelineClock.shouldAnimate = false;
+                      }
+                    });
+                  }
+                : undefined
           };
         })
       );
