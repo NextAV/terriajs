@@ -93,6 +93,11 @@ const ChartPanel: FC<ChartPanelProps> = observer(
     // the timeline clock. Reading `currentTime` in this observer makes the header
     // label + the chart's permanent marker reactive to every scrub. undefined
     // when not opted in → the stock "Charts" label + no marker (byte-identical).
+    // NOTE: the label is UTC (`toISOString`), matching how the chart's time axis
+    // + the discrete scrubber read the (UTC) detection instants — so the header
+    // date and the marker agree on the same calendar day for a UTC-instant tenant
+    // like al-shaheen. A tenant whose instants sit near a UTC midnight boundary in
+    // a non-UTC display would want a locale-aware format before opting in.
     const selectedTimeMs =
       showSelectedDate && viewState.terria.timelineClock?.currentTime
         ? JulianDate.toDate(
@@ -130,6 +135,14 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           selectedTimeMs={selectedTimeMs}
         />
       );
+      // `selectedTimeMs` is a dep so the marker moves on scrub. This re-runs the
+      // memo body — including the `loadMapItems()` Promise.all — on every scrub,
+      // but `loadMapItems` is internally load-cached/deduped (returns instantly
+      // once loaded), so the cost is a throwaway Promise per scrub, not re-loading
+      // data. Kept inline rather than restructuring the shared loader into a
+      // useEffect, to keep this fork change minimal + byte-identical for every
+      // caller that doesn't opt in (selectedTimeMs stays undefined → memo never
+      // re-runs more often for them).
     }, [
       chartItems,
       xAxis,
