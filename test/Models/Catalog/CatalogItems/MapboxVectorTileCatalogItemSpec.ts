@@ -8,6 +8,8 @@ import {
 } from "protomaps-leaflet";
 import ProtomapsImageryProvider from "../../../../lib/Map/ImageryProvider/ProtomapsImageryProvider";
 import {
+  colorFn,
+  colorOrFn,
   filterFn,
   getFont,
   numberFn,
@@ -310,6 +312,105 @@ describe("MapboxVectorTileCatalogItem", function () {
       expect(n(14, { ...emptyFeature, props: { scalerank: 1 } })).toEqual(2);
       expect(n(14, { ...emptyFeature, props: { scalerank: 3 } })).toEqual(4);
       expect(n(14, { ...emptyFeature, props: { scalerank: 4 } })).toEqual(4);
+    });
+
+    it("colorFn constant", async () => {
+      // A plain colour string is returned unchanged (byte-identical passthrough).
+      expect(colorFn("#2166ac")).toEqual("#2166ac");
+      expect(colorFn("rgba(1, 2, 3, 0.5)")).toEqual("rgba(1, 2, 3, 0.5)");
+      // colorOrFn: string passthrough, undefined -> default.
+      expect(colorOrFn("#2166ac")).toEqual("#2166ac");
+      expect(colorOrFn(undefined)).toBeUndefined();
+      expect(colorOrFn(undefined, "black")).toEqual("black");
+    });
+
+    it("colorFn property-linear interpolate returns a function", async () => {
+      const n = colorFn([
+        "interpolate",
+        ["linear"],
+        ["get", "v"],
+        -10,
+        "#000000",
+        10,
+        "#ffffff"
+      ]);
+      // Data-driven colour is a per-feature (z, f) => color function.
+      expect(typeof n).toEqual("function");
+      const fn = n as (z: number, f?: any) => string;
+      // Exact stop values return the exact stop colour strings.
+      expect(fn(0, { ...emptyFeature, props: { v: -10 } })).toEqual("#000000");
+      expect(fn(0, { ...emptyFeature, props: { v: 10 } })).toEqual("#ffffff");
+      // Midpoint is the RGB midpoint (0/255 -> 128/128/128).
+      expect(fn(0, { ...emptyFeature, props: { v: 0 } })).toEqual(
+        "rgb(128, 128, 128)"
+      );
+      // Below/above range clamps to the end colours.
+      expect(fn(0, { ...emptyFeature, props: { v: -999 } })).toEqual("#000000");
+      expect(fn(0, { ...emptyFeature, props: { v: 999 } })).toEqual("#ffffff");
+    });
+
+    it("colorFn step returns the right colour per band", async () => {
+      const n = colorFn([
+        "step",
+        ["get", "band"],
+        "#aaaaaa",
+        1,
+        "#bbbbbb",
+        3,
+        "#cccccc"
+      ]);
+      expect(typeof n).toEqual("function");
+      const fn = n as (z: number, f?: any) => string;
+      // val < v1(=1) -> c0; v1 <= val < v2(=3) -> c1; val >= v2 -> c2.
+      expect(fn(0, { ...emptyFeature, props: { band: 0 } })).toEqual("#aaaaaa");
+      expect(fn(0, { ...emptyFeature, props: { band: 1 } })).toEqual("#bbbbbb");
+      // INTERIOR value between non-adjacent stops (1 <= 2 < 3) -> middle band.
+      // This is the case the buggy numberFn step mis-bands (would return c2).
+      expect(fn(0, { ...emptyFeature, props: { band: 2 } })).toEqual("#bbbbbb");
+      expect(fn(0, { ...emptyFeature, props: { band: 3 } })).toEqual("#cccccc");
+      expect(fn(0, { ...emptyFeature, props: { band: 4 } })).toEqual("#cccccc");
+      // Non-numeric input falls back to the default output0.
+      expect(fn(0, { ...emptyFeature, props: {} })).toEqual("#aaaaaa");
+    });
+
+    it("colorFn ground-motion velocity ramp", async () => {
+      // The concrete EGMS/InSAR ground-motion (P0-3) case: a diverging ramp
+      // over a `mean_velocity` property.
+      const n = colorFn([
+        "interpolate",
+        ["linear"],
+        ["get", "mean_velocity"],
+        -15,
+        "#2166ac",
+        0,
+        "#f7f7f7",
+        15,
+        "#b2182b"
+      ]);
+      const fn = n as (z: number, f?: any) => string;
+      // Exact stops -> exact stop colours.
+      expect(fn(0, { ...emptyFeature, props: { mean_velocity: -15 } })).toEqual(
+        "#2166ac"
+      );
+      expect(fn(0, { ...emptyFeature, props: { mean_velocity: 0 } })).toEqual(
+        "#f7f7f7"
+      );
+      expect(fn(0, { ...emptyFeature, props: { mean_velocity: 15 } })).toEqual(
+        "#b2182b"
+      );
+      // -7.5 is the RGB midpoint of the first segment
+      // #2166ac = (33,102,172), #f7f7f7 = (247,247,247) -> (140, 175, 210).
+      expect(
+        fn(0, { ...emptyFeature, props: { mean_velocity: -7.5 } })
+      ).toEqual("rgb(140, 175, 210)");
+    });
+
+    it("colorFn unimplemented returns a type-safe fallback colour", async () => {
+      const raw = ["some-unimplemented-expr", 1, 2];
+      // Mirrors numberFn degrading to (_) => 1: logs + returns a TYPE-SAFE
+      // constant colour string (never the raw array, which would violate
+      // ColorAttr and reach protomaps as a broken paint).
+      expect(colorFn(raw)).toEqual("#000000");
     });
 
     it("font", async () => {
