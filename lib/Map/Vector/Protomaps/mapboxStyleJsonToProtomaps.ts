@@ -242,23 +242,36 @@ export function colorFn(obj: any): ColorAttr {
       return stops[stops.length - 1][1];
     };
   }
-  // Property-based step: ["step", ["get", prop], c0, v1, c1, ...]
-  if (Array.isArray(obj) && obj[0] === "step" && obj[1][0] === "get") {
-    const slice = obj.slice(2);
+  // Property-based step: ["step", ["get", prop], c0, v1, c1, v2, c2, ...]
+  // Mapbox `step` semantics (lower-closed bands): val < v1 -> c0;
+  // v1 <= val < v2 -> c1; ...; val >= vN -> cN. (A value on a stop boundary
+  // belongs to the higher band.) NOT the buggy numberFn step (which mis-bands
+  // interior values across >=3 stops) -- written fresh here.
+  if (
+    Array.isArray(obj) &&
+    obj[0] === "step" &&
+    Array.isArray(obj[1]) &&
+    obj[1][0] === "get"
+  ) {
+    const slice = obj.slice(2); // [c0, v1, c1, v2, c2, ...]
     const prop = obj[1][1];
     return (_: number, f?: Feature) => {
       const val = f?.props[prop];
-      if (typeof val === "number") {
-        if (val < slice[1]) return slice[0];
-        for (let i = 1; i < slice.length; i += 2) {
-          if (val <= slice[i]) return slice[i + 1];
-        }
+      // Non-numeric input falls back to the default output (output0).
+      if (typeof val !== "number") return slice[0];
+      let output = slice[0];
+      for (let i = 1; i + 1 < slice.length; i += 2) {
+        if (val >= slice[i]) output = slice[i + 1];
+        else break; // stops are ascending -> no later band can match
       }
-      return slice[slice.length - 1];
+      return output;
     };
   }
+  // Unimplemented expression -> log + a TYPE-SAFE constant fallback colour
+  // (mirrors numberFn degrading to (_) => 1); never return the raw array,
+  // which would violate ColorAttr and re-introduce the broken-render this fixes.
   console.log("Unimplemented color fn: ", obj);
-  return obj;
+  return "#000000";
 }
 
 export function colorOrFn(

@@ -361,10 +361,16 @@ describe("MapboxVectorTileCatalogItem", function () {
       ]);
       expect(typeof n).toEqual("function");
       const fn = n as (z: number, f?: any) => string;
+      // val < v1(=1) -> c0; v1 <= val < v2(=3) -> c1; val >= v2 -> c2.
       expect(fn(0, { ...emptyFeature, props: { band: 0 } })).toEqual("#aaaaaa");
       expect(fn(0, { ...emptyFeature, props: { band: 1 } })).toEqual("#bbbbbb");
+      // INTERIOR value between non-adjacent stops (1 <= 2 < 3) -> middle band.
+      // This is the case the buggy numberFn step mis-bands (would return c2).
+      expect(fn(0, { ...emptyFeature, props: { band: 2 } })).toEqual("#bbbbbb");
       expect(fn(0, { ...emptyFeature, props: { band: 3 } })).toEqual("#cccccc");
       expect(fn(0, { ...emptyFeature, props: { band: 4 } })).toEqual("#cccccc");
+      // Non-numeric input falls back to the default output0.
+      expect(fn(0, { ...emptyFeature, props: {} })).toEqual("#aaaaaa");
     });
 
     it("colorFn ground-motion velocity ramp", async () => {
@@ -399,10 +405,12 @@ describe("MapboxVectorTileCatalogItem", function () {
       ).toEqual("rgb(140, 175, 210)");
     });
 
-    it("colorFn unimplemented passes the raw value through", async () => {
+    it("colorFn unimplemented returns a type-safe fallback colour", async () => {
       const raw = ["some-unimplemented-expr", 1, 2];
-      // Mirrors numberFn: logs + returns the raw value (never throws).
-      expect(colorFn(raw)).toEqual(raw as any);
+      // Mirrors numberFn degrading to (_) => 1: logs + returns a TYPE-SAFE
+      // constant colour string (never the raw array, which would violate
+      // ColorAttr and reach protomaps as a broken paint).
+      expect(colorFn(raw)).toEqual("#000000");
     });
 
     it("font", async () => {
