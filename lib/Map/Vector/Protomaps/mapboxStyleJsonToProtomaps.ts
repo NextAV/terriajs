@@ -128,6 +128,152 @@ export function numberOrFn(
   return (z: number, f?: Feature) => (f ? numberFn(obj)(z, f) : defaultValue);
 }
 
+/** A protomaps colour attribute: a plain CSS colour string or a
+ * per-feature `(z, f) => cssColorString` function (protomaps `AttrOption<string>`).
+ */
+export type ColorAttr = string | ((z: number, f?: Feature) => string);
+
+/** Parse a CSS colour string (`#rgb`, `#rrggbb`, `#rgba`, `#rrggbbaa`,
+ * `rgb(...)`, `rgba(...)`) into `[r, g, b, a]` (channels 0-255, alpha 0-1),
+ * or `undefined` if it can't be parsed. */
+function parseColor(c: string): [number, number, number, number] | undefined {
+  const s = c.trim();
+  const hex = s.match(/^#([0-9a-fA-F]{3,8})$/);
+  if (hex) {
+    const h = hex[1];
+    if (h.length === 3 || h.length === 4) {
+      const r = parseInt(h[0] + h[0], 16);
+      const g = parseInt(h[1] + h[1], 16);
+      const b = parseInt(h[2] + h[2], 16);
+      const a = h.length === 4 ? parseInt(h[3] + h[3], 16) / 255 : 1;
+      return [r, g, b, a];
+    }
+    if (h.length === 6 || h.length === 8) {
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
+      return [r, g, b, a];
+    }
+    return undefined;
+  }
+  const rgb = s.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgb) {
+    const parts = rgb[1].split(",").map((p) => parseFloat(p.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => !isNaN(n))) {
+      const a = parts.length >= 4 && !isNaN(parts[3]) ? parts[3] : 1;
+      return [parts[0], parts[1], parts[2], a];
+    }
+  }
+  return undefined;
+}
+
+/** Linearly interpolate between two CSS colours in RGB space at fraction `t`
+ * (clamped to [0, 1]). Returns `rgb(...)`/`rgba(...)`; if either colour is
+ * unparseable, falls back to the nearer endpoint string. */
+function interpolateColor(c0: string, c1: string, t: number): string {
+  const a = parseColor(c0);
+  const b = parseColor(c1);
+  if (!a || !b) return t < 0.5 ? c0 : c1;
+  const tt = Math.max(0, Math.min(1, t));
+  const lerp = (x: number, y: number) => x + (y - x) * tt;
+  const r = Math.round(lerp(a[0], b[0]));
+  const g = Math.round(lerp(a[1], b[1]));
+  const bl = Math.round(lerp(a[2], b[2]));
+  if (a[3] < 1 || b[3] < 1) {
+    return `rgba(${r}, ${g}, ${bl}, ${lerp(a[3], b[3])})`;
+  }
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+/** Colour analogue of {@link numberFn}. Where `numberFn` covers zoom-based
+ * numeric interpolate/step for radius/width, `colorFn` covers **property-based**
+ * colour paints so a data-driven `circle-color`/`fill-color`/`line-color` renders
+ * a continuous gradient (or discrete bands) instead of a raw expression array.
+ * Handles:
+ * - a plain CSS colour string -> returned as-is (backward-compatible);
+ * - `["interpolate", ["linear"], ["get", prop], v0, c0, v1, c1, ...]` -> a
+ *   `(z, f) => color` that reads `f.props[prop]`, finds the bracketing stops and
+ *   linearly interpolates in RGB, clamping below the first / above the last stop;
+ * - `["step", ["get", prop], c0, v1, c1, ...]` -> a per-band step function
+ *   (mirrors `numberFn`'s step branch);
+ * - anything else -> logs and passes the raw value through (never throws).
+ */
+export function colorFn(obj: any): ColorAttr {
+  // Plain colour string -> unchanged (backward-compat path).
+  if (typeof obj === "string") {
+    return obj;
+  }
+  // Property-based linear interpolate:
+  // ["interpolate", ["linear"], ["get", prop], v0, c0, v1, c1, ...]
+  if (
+    Array.isArray(obj) &&
+    obj[0] === "interpolate" &&
+    Array.isArray(obj[1]) &&
+    obj[1][0] === "linear" &&
+    Array.isArray(obj[2]) &&
+    obj[2][0] === "get"
+  ) {
+    const prop = obj[2][1];
+    const slice = obj.slice(3);
+    const stops: [number, string][] = [];
+    for (let i = 0; i < slice.length; i += 2) {
+      stops.push([slice[i], slice[i + 1]]);
+    }
+    return (_: number, f?: Feature) => {
+      const val = f?.props[prop];
+      if (typeof val !== "number" || stops.length === 0) {
+        return stops.length ? stops[0][1] : "black";
+      }
+      // Clamp outside the stop range to the end colours.
+      if (val <= stops[0][0]) return stops[0][1];
+      if (val >= stops[stops.length - 1][0]) return stops[stops.length - 1][1];
+      for (let i = 0; i < stops.length - 1; i++) {
+        const [v0, c0] = stops[i];
+        const [v1, c1] = stops[i + 1];
+        // Return the exact stop colour string when val lands on a stop.
+        if (val === v0) return c0;
+        if (val === v1) return c1;
+        if (val > v0 && val < v1) {
+          const t = v1 === v0 ? 0 : (val - v0) / (v1 - v0);
+          return interpolateColor(c0, c1, t);
+        }
+      }
+      return stops[stops.length - 1][1];
+    };
+  }
+  // Property-based step: ["step", ["get", prop], c0, v1, c1, ...]
+  if (Array.isArray(obj) && obj[0] === "step" && obj[1][0] === "get") {
+    const slice = obj.slice(2);
+    const prop = obj[1][1];
+    return (_: number, f?: Feature) => {
+      const val = f?.props[prop];
+      if (typeof val === "number") {
+        if (val < slice[1]) return slice[0];
+        for (let i = 1; i < slice.length; i += 2) {
+          if (val <= slice[i]) return slice[i + 1];
+        }
+      }
+      return slice[slice.length - 1];
+    };
+  }
+  console.log("Unimplemented color fn: ", obj);
+  return obj;
+}
+
+export function colorOrFn(
+  obj: any,
+  defaultValue?: string
+): ColorAttr | undefined {
+  if (obj === undefined || obj === null) return defaultValue;
+  // A plain colour string is returned unchanged (byte-identical passthrough);
+  // an expression array becomes a per-feature colour function.
+  if (typeof obj === "string") {
+    return obj;
+  }
+  return colorFn(obj);
+}
+
 export function widthFn(width_obj: any, gap_obj: any) {
   const w = numberOrFn(width_obj, 1);
   const g = numberOrFn(gap_obj);
@@ -231,7 +377,7 @@ export function mapboxStyleJsonToProtomaps(
           dataLayer: layer["source-layer"],
           filter: filter,
           symbolizer: new PolygonSymbolizer({
-            fill: layer.paint["fill-color"],
+            fill: colorOrFn(layer.paint["fill-color"]),
             opacity: layer.paint["fill-opacity"]
           })
         });
@@ -241,7 +387,7 @@ export function mapboxStyleJsonToProtomaps(
           dataLayer: layer["source-layer"],
           filter: filter,
           symbolizer: new PolygonSymbolizer({
-            fill: layer.paint["fill-extrusion-color"],
+            fill: colorOrFn(layer.paint["fill-extrusion-color"]),
             opacity: layer.paint["fill-extrusion-opacity"]
           })
         });
@@ -265,7 +411,7 @@ export function mapboxStyleJsonToProtomaps(
             dataLayer: layer["source-layer"],
             filter: filter,
             symbolizer: new LineSymbolizer({
-              color: layer.paint["line-color"],
+              color: colorOrFn(layer.paint["line-color"]),
               width: widthFn(
                 layer.paint["line-width"],
                 layer.paint["line-gap-width"]
@@ -280,9 +426,9 @@ export function mapboxStyleJsonToProtomaps(
             filter: filter,
             symbolizer: new LineLabelSymbolizer({
               font: getFont(layer.layout, fontSubMap),
-              fill: layer.paint["text-color"],
+              fill: colorOrFn(layer.paint["text-color"]),
               width: layer.paint["text-halo-width"],
-              stroke: layer.paint["text-halo-color"],
+              stroke: colorOrFn(layer.paint["text-halo-color"]),
               textTransform: layer.layout["text-transform"],
               labelProps: layer.layout["text-field"]
                 ? [layer.layout["text-field"]]
@@ -295,8 +441,8 @@ export function mapboxStyleJsonToProtomaps(
             filter: filter,
             symbolizer: new CenteredTextSymbolizer({
               font: getFont(layer.layout, fontSubMap),
-              fill: layer.paint["text-color"],
-              stroke: layer.paint["text-halo-color"],
+              fill: colorOrFn(layer.paint["text-color"]),
+              stroke: colorOrFn(layer.paint["text-halo-color"]),
               width: layer.paint["text-halo-width"],
               textTransform: layer.layout["text-transform"],
               labelProps: layer.layout["text-field"]
@@ -311,8 +457,8 @@ export function mapboxStyleJsonToProtomaps(
           filter: filter,
           symbolizer: new CircleSymbolizer({
             radius: layer.paint["circle-radius"],
-            fill: layer.paint["circle-color"],
-            stroke: layer.paint["circle-stroke-color"],
+            fill: colorOrFn(layer.paint["circle-color"]),
+            stroke: colorOrFn(layer.paint["circle-stroke-color"]),
             width: layer.paint["circle-stroke-width"]
           })
         });
