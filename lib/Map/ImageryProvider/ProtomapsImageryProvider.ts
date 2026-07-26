@@ -86,6 +86,18 @@ export const PROTOMAPS_TILE_BUFFER = 32;
 /** Tile cache tile size for protomaps-leaflet */
 const TILE_CACHE_TILE_SIZE = 1024;
 
+/** Click tolerance (in display-tile pixels) for `pickFeatures`.
+ *
+ * protomaps' `View.queryFeatures` only returns a Point (or Line) feature
+ * when the click lands within `brushSize` of its geometry — polygons use
+ * point-in-polygon and ignore it. The previous hardcoded `1` made point
+ * MVT layers (e.g. PSI velocity points rendered as 3px circles)
+ * effectively unpickable (~1px tolerance). `16` matches protomaps-leaflet's
+ * own frontend default (`leaflet.ts: brushSize = 16`); the view divides it
+ * by 2^(displayZoom - dataZoom), so the on-screen tolerance stays constant
+ * under overzoom. */
+const FEATURE_PICK_BRUSH_SIZE = 16;
+
 export default class ProtomapsImageryProvider implements ImageryProviderWithGridLayerSupport {
   private readonly terria: Terria;
 
@@ -359,7 +371,7 @@ export default class ProtomapsImageryProvider implements ImageryProviderWithGrid
           CesiumMath.toDegrees(longitude),
           CesiumMath.toDegrees(latitude),
           level,
-          1
+          FEATURE_PICK_BRUSH_SIZE
         )
         .forEach((f) => {
           // Only create FeatureInfo for visible features with properties
