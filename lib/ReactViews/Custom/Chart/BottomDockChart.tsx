@@ -492,7 +492,15 @@ const calculateDomainX = (chartItems: ChartItem[]) => {
 const calculateDomainY = (chartItems: ChartItem[]) => {
   const ymin = Math.min(...chartItems.map((c) => c.domain.y[0]));
   const ymax = Math.max(...chartItems.map((c) => c.domain.y[1]));
-  return [ymin, ymax];
+  // Bar charts must be ZERO-BASED: a non-zero baseline misrepresents magnitude
+  // (on a [dataMin, dataMax] domain a small-count bar renders at near-zero
+  // height, so the bar lengths no longer read as proportional to their values).
+  // Floor the shared y-domain at 0 only when a bar item is present; `Math.min(0,
+  // ymin)` still admits genuinely-negative data. A line-only panel (every
+  // non-bar tenant, e.g. the QE methane chart) keeps the data-driven min, so its
+  // domain is byte-identical to before.
+  const hasBar = chartItems.some((c) => c.type === "bar");
+  return [hasBar ? Math.min(0, ymin) : ymin, ymax];
 };
 
 const findNearestPoint = (
