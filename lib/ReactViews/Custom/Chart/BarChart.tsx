@@ -119,9 +119,12 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
 
     const fill = color || chartItem.getColor();
     const width = computeBarWidth(bars, scales.x);
-    // Anchor at the plot bottom (the larger end of the inverted [height, 0] y-range) so a
-    // bar's base sits on the axis regardless of whether the y-domain is floored at 0 — a
-    // small-count bar is never clipped to zero height by a non-zero domain minimum.
+    // Anchor at the plot bottom (the larger end of the inverted [height, 0] y-range).
+    // A bar's HEIGHT is baseline - scales.y(value), so it is proportional to `value`
+    // only when the y-domain includes 0 (then scales.y(0) == baseline). calculateDomainY
+    // (BottomDockChart) zero-bases the domain whenever a bar item is present for exactly
+    // this reason: a non-zero domain minimum collapses the smallest-value bar toward
+    // zero height.
     const [r0, r1] = scales.y.range();
     const baseline = Math.max(r0, r1);
     const plotTop = Math.min(r0, r1);
