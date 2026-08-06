@@ -253,6 +253,21 @@ class CatalogMemberTraits extends ModelTraits {
 
   @primitiveTrait({
     type: "boolean",
+    name: "Hide in workbench",
+    description:
+      "When true, this member does not render a row in the workbench list UI " +
+      "while remaining a REAL workbench item — its map/chart surfaces, timeline " +
+      "participation, and z-order slot are unchanged. Opt-in (default false = " +
+      "byte-identical). Intended for 'visibility group' children whose show " +
+      "state is driven by a parent entry (NextAV al-shaheen); typically set at " +
+      "runtime by the consuming viewer, not in catalog JSON."
+  })
+  get hideInWorkbench(): boolean | undefined {
+    return;
+  }
+
+  @primitiveTrait({
+    type: "boolean",
     name: "Shareable",
     description:
       "True (default) if this catalog member may be included in share links. False to exclude it from share links."
