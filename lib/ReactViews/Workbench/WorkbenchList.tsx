@@ -7,6 +7,7 @@ import styled from "styled-components";
 import Terria from "../../Models/Terria";
 import ViewState from "../../ReactViewModels/ViewState";
 import { Ul } from "../../Styled/List";
+import visibleWorkbenchItems from "./visibleWorkbenchItems";
 import WorkbenchItem from "./WorkbenchItem";
 import WorkbenchSplitScreen from "./WorkbenchSplitScreen";
 
@@ -46,9 +47,7 @@ class WorkbenchList extends Component<IProps> {
     // that slot — otherwise a hidden linked item sitting between visible rows
     // skews every drop below it.
     const items = this.props.terria.workbench.items;
-    const visible = items.filter(
-      (i) => (i as any).hideInWorkbench !== true
-    );
+    const visible = visibleWorkbenchItems(this.props.terria);
     const target = visible[currentDraggingIndex];
     const realIndex =
       target !== undefined ? items.indexOf(target) : currentDraggingIndex;
@@ -79,18 +78,16 @@ class WorkbenchList extends Component<IProps> {
             width: 100%;
           `}
         >
-          {this.props.terria.workbench.items
-            .filter((item) => (item as any).hideInWorkbench !== true)
-            .map((item) => {
-              return (
-                <WorkbenchItem
-                  item={item}
-                  sortData={item}
-                  key={item.uniqueId}
-                  viewState={this.props.viewState}
-                />
-              );
-            })}
+          {visibleWorkbenchItems(this.props.terria).map((item) => {
+            return (
+              <WorkbenchItem
+                item={item}
+                sortData={item}
+                key={item.uniqueId}
+                viewState={this.props.viewState}
+              />
+            );
+          })}
         </Sortable>
       </StyledUl>
     );

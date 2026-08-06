@@ -10,6 +10,7 @@ import { RawButton } from "../../Styled/Button";
 import { TextSpan } from "../../Styled/Text";
 import BadgeBar from "../BadgeBar";
 import Icon, { StyledIcon } from "../../Styled/Icon";
+import visibleWorkbenchItems from "./visibleWorkbenchItems";
 import WorkbenchList from "./WorkbenchList";
 import {
   Category,
@@ -70,8 +71,12 @@ class Workbench extends Component<IProps> {
     const { t } = this.props;
     const shouldExpandAll = this.props.terria.workbench.shouldExpandAll;
 
-    // show enable all button if all items are disabled
-    const showEnableAll = this.props.terria.workbench.items
+    // Show the enable-all button if every VISIBLE row's item is disabled —
+    // the button reflects what the user sees. hideInWorkbench "visibility
+    // group" children are excluded (their show state follows their parent;
+    // workbench.enableAll() still enables them, and the group sync keeps
+    // them consistent).
+    const showEnableAll = visibleWorkbenchItems(this.props.terria)
       .filter((it): it is MappableMixin.Instance =>
         MappableMixin.isMixedInto(it)
       )
@@ -81,7 +86,10 @@ class Workbench extends Component<IProps> {
       <Box column fullWidth styledMinHeight={"0"} flex={1}>
         <BadgeBar
           label={t("workbench.label")}
-          badge={this.props.terria.workbench.items.length}
+          // Count the rows the list actually renders — hideInWorkbench
+          // children are real workbench items but show no row, and a badge
+          // reading "5" over a 2-row list is a visible contradiction.
+          badge={visibleWorkbenchItems(this.props.terria).length}
         >
           {showEnableAll ? (
             <RawButton
