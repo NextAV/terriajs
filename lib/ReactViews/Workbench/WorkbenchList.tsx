@@ -39,9 +39,22 @@ class WorkbenchList extends Component<IProps> {
     currentDraggingSortData: any,
     currentDraggingIndex: any
   ) {
+    // The Sortable renders only the VISIBLE items (hideInWorkbench filtered
+    // out below), so its drag index is an index into the visible list. The
+    // workbench array still contains the hidden items, so translate the drop
+    // position to a full-array index via the visible item currently occupying
+    // that slot — otherwise a hidden linked item sitting between visible rows
+    // skews every drop below it.
+    const items = this.props.terria.workbench.items;
+    const visible = items.filter(
+      (i) => (i as any).hideInWorkbench !== true
+    );
+    const target = visible[currentDraggingIndex];
+    const realIndex =
+      target !== undefined ? items.indexOf(target) : currentDraggingIndex;
     this.props.terria.workbench.moveItemToIndex(
       currentDraggingSortData,
-      currentDraggingIndex
+      realIndex
     );
   }
 
@@ -66,16 +79,18 @@ class WorkbenchList extends Component<IProps> {
             width: 100%;
           `}
         >
-          {this.props.terria.workbench.items.map((item) => {
-            return (
-              <WorkbenchItem
-                item={item}
-                sortData={item}
-                key={item.uniqueId}
-                viewState={this.props.viewState}
-              />
-            );
-          })}
+          {this.props.terria.workbench.items
+            .filter((item) => (item as any).hideInWorkbench !== true)
+            .map((item) => {
+              return (
+                <WorkbenchItem
+                  item={item}
+                  sortData={item}
+                  key={item.uniqueId}
+                  viewState={this.props.viewState}
+                />
+              );
+            })}
         </Sortable>
       </StyledUl>
     );
