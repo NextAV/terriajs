@@ -171,6 +171,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       viewState.terria,
       setChartXDomain,
       setChartPlotFrac,
+      setChartActiveXDomain,
       selectedTimeMs
     ]);
 
