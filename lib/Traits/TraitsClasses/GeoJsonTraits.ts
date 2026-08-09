@@ -129,7 +129,11 @@ export class GeoJsonTraits extends mixTraits(
       "feature honestly shows an empty layer instead of carrying the previous feature " +
       "forward. Instants equal (after ISO normalisation) to a feature instant are " +
       "deduplicated; unparsable strings are skipped. Only applies when `timeProperty` is " +
-      "set on the cesium-primitives path; ignored for geojson-vt/protomaps table styling."
+      "set on the cesium-primitives path; ignored for geojson-vt/protomaps table styling. " +
+      "COMPOSITION NOTE: a trailing extra (an observation AFTER the last feature) makes " +
+      "`stopTime` an empty instant, and the default `initialTimeSource` resolves the boot " +
+      "clock there — pair this trait with an explicit `currentTime` (e.g. the newest " +
+      "feature instant) or the layer boots honestly EMPTY."
   })
   extraDiscreteTimes?: string[];
 

@@ -709,6 +709,15 @@ describe("GeoJsonCatalogItemSpec", () => {
           await load(["not-a-date", "", "2020-06-01T00:00:00Z"]);
           expect(geojson.discreteTimes?.length).toEqual(3);
         });
+
+        it("leaves discreteTimes untouched when the trait is an empty list", async () => {
+          // The inertness contract: no extras -> the feature-derived set,
+          // byte-identical (the absent-trait path is the pre-existing spec
+          // above; this locks the explicit-empty spelling too).
+          const entities = await load([]);
+          expect(geojson.discreteTimes?.length).toEqual(2);
+          expect(entities.length).toEqual(2);
+        });
       });
     });
 
