@@ -649,6 +649,76 @@ describe("GeoJsonCatalogItemSpec", () => {
           )
         ).toBeTruthy();
       });
+
+      describe("extraDiscreteTimes (observation instants with no feature)", () => {
+        const load = async (extras: string[]) => {
+          geojson.setTrait(
+            CommonStrata.user,
+            "url",
+            "test/GeoJSON/time-based.geojson"
+          );
+          geojson.setTrait(CommonStrata.user, "timeProperty", "year");
+          geojson.setTrait(CommonStrata.user, "extraDiscreteTimes", extras);
+          await geojson.loadMapItems();
+          return (geojson.mapItems[0] as GeoJsonDataSource).entities.values;
+        };
+
+        it("unions extras into discreteTimes and closes availability at the NEXT observation", async () => {
+          // Features carry 2019 + 2021; extras add an observation between them
+          // and one after the last feature.
+          const entities = await load([
+            "2020-06-01T00:00:00Z",
+            "2022-01-01T00:00:00Z"
+          ]);
+          expect(geojson.discreteTimes?.length).toEqual(4);
+
+          // The 2019 feature's window now closes at the 2020 observation (we
+          // looked, saw nothing) instead of stretching to the 2021 feature.
+          const entity2019 = entities[1];
+          expect(
+            entity2019.availability?.stop.equals(
+              JulianDate.fromDate(new Date("2020-06-01T00:00:00Z"))
+            )
+          ).toBeTruthy();
+
+          // The LAST feature (2021) now closes at the trailing observation
+          // instead of Iso8601.MAXIMUM_VALUE — after 2022-01-01 the layer is
+          // honestly empty rather than carrying the 2021 feature forever.
+          const entity2021 = entities[0];
+          expect(
+            entity2021.availability?.stop.equals(
+              JulianDate.fromDate(new Date("2022-01-01T00:00:00Z"))
+            )
+          ).toBeTruthy();
+        });
+
+        it("dedupes an extra equal to a feature instant (ISO-normalised) and keeps the feature's entry", async () => {
+          // "2021-01-01T00:00:00Z" is the same INSTANT as the feature tag
+          // "2021" — must not create a second discrete step 0 ms away, and the
+          // feature's own tag entry (what availability lookup matches) stays.
+          await load(["2021-01-01T00:00:00.000Z"]);
+          expect(geojson.discreteTimes?.length).toEqual(2);
+          // The fixture's `year` is the NUMBER 2021, so the feature entry's tag
+          // is numeric — compare via String() rather than assuming a string tag.
+          expect(
+            geojson.discreteTimes?.some((dt) => String(dt.tag) === "2021")
+          ).toBeTruthy();
+        });
+
+        it("skips unparsable extras instead of throwing", async () => {
+          await load(["not-a-date", "", "2020-06-01T00:00:00Z"]);
+          expect(geojson.discreteTimes?.length).toEqual(3);
+        });
+
+        it("leaves discreteTimes untouched when the trait is an empty list", async () => {
+          // The inertness contract: no extras -> the feature-derived set,
+          // byte-identical (the absent-trait path is the pre-existing spec
+          // above; this locks the explicit-empty spelling too).
+          const entities = await load([]);
+          expect(geojson.discreteTimes?.length).toEqual(2);
+          expect(entities.length).toEqual(2);
+        });
+      });
     });
 
     describe("Support for filterByProperties", () => {

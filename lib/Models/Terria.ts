@@ -664,6 +664,26 @@ export default class Terria {
     this.bottomChartPlotFrac = frac;
   }
 
+  /**
+   * The bottom-dock chart's ACTIVE x-domain as `[startMs, stopMs]` epoch-ms:
+   * the zoomed window while a d3 zoom is applied, else the chart's INITIAL
+   * (data-extent-padded) domain. Unlike `bottomChartXDomain` (zoom events
+   * only, `undefined` at rest), this is defined whenever a time-axis chart is
+   * mounted — so a consumer can map a DATE to a plot-band pixel exactly:
+   * `x = plotLeft + (dateMs - start) / (stop - start) * plotWidth`, with the
+   * plot band from `bottomChartPlotFrac`. This is the single source of truth
+   * that replaces measuring rendered bars (which breaks the moment a second
+   * series mounts) or re-deriving the domain padding heuristically. Written by
+   * `ChartPanel`; UI-transient; `.ref` for wholesale tuple replacement.
+   */
+  @observable.ref
+  bottomChartActiveXDomain: [number, number] | undefined = undefined;
+
+  @action
+  setBottomChartActiveXDomain(domain: [number, number] | undefined) {
+    this.bottomChartActiveXDomain = domain;
+  }
+
   /** Gets or sets the active SelectableDimensionWorkflow, if defined, then the workflow will be displayed using `WorkflowPanel` */
   @observable
   selectableDimensionWorkflow?: SelectableDimensionWorkflow;

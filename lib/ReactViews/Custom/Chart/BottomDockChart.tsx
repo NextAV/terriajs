@@ -39,6 +39,18 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
   onXDomainChange?: (domain: [number, number] | undefined) => void;
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
   /**
+   * Optional: publishes the chart's ACTIVE x-domain — the zoomed domain when a
+   * d3 zoom is applied, else the initial (data-extent-padded) domain — as
+   * [startMs, stopMs], on every domain change including first mount. This is
+   * the missing half of `onXDomainChange` (which only fires on ZOOM events): a
+   * consumer that must map a DATE to a pixel inside the plot band (e.g. a
+   * scrubber rail aligning its ticks under the bars) needs the padded initial
+   * domain too — reconstructing the padding heuristically is exactly the
+   * misalignment class this callback removes. Time-axis charts only; a
+   * linear-x chart publishes `undefined`.
+   */
+  onActiveXDomainChange?: (domain: [number, number] | undefined) => void;
+  /**
    * Optional epoch-ms of the timeline clock's currently-SELECTED time. When
    * provided (and the x-axis is time), the chart draws a PERMANENT vertical
    * marker at that date — always visible, distinct from the transient hover
@@ -59,6 +71,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
     margin,
     onXDomainChange,
     onPlotFracChange,
+    onActiveXDomainChange,
     selectedTimeMs
   }) => {
     return (
@@ -70,6 +83,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         width={Math.max(CHART_MIN_WIDTH, width || parentWidth)}
         onXDomainChange={onXDomainChange}
         onPlotFracChange={onPlotFracChange}
+        onActiveXDomainChange={onActiveXDomainChange}
         selectedTimeMs={selectedTimeMs}
       />
     );
@@ -104,6 +118,12 @@ interface ChartProps {
    * `useEffect` (which lists `onPlotFracChange` in its deps) every render.
    */
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
+  /**
+   * Fired with the ACTIVE x-domain [startMs, stopMs] (zoomed if zoomed, else
+   * the padded initial domain), on mount and on every domain change; the same
+   * stable-callback requirement as the two callbacks above.
+   */
+  onActiveXDomainChange?: (domain: [number, number] | undefined) => void;
   /** Epoch-ms of the selected timeline time → a permanent vertical marker. */
   selectedTimeMs?: number;
 }
@@ -117,6 +137,7 @@ const Chart: React.FC<ChartProps> = observer(
     margin = DEFAULT_MARGIN,
     onXDomainChange,
     onPlotFracChange,
+    onActiveXDomainChange,
     selectedTimeMs
   }) => {
     const [zoomedXScale, setZoomedXScale] = useState<XScale | undefined>(
@@ -330,6 +351,26 @@ const Chart: React.FC<ChartProps> = observer(
         xAxis.scale === "time" ? [leftFrac, rightFrac] : undefined
       );
     }, [leftFrac, rightFrac, xAxis.scale, onPlotFracChange]);
+
+    // Publish the ACTIVE x-domain (zoomed if zoomed, else the padded initial
+    // domain) for date→pixel consumers — the missing half of onXDomainChange,
+    // which only fires on zoom EVENTS and so never carries the initial padded
+    // domain. Same effect-not-render rule as onPlotFracChange above; primitive
+    // deps so an identical domain re-render never re-publishes. `activeDomain`
+    // is [NaN, NaN] for a non-time axis → publishes undefined.
+    const activeDomainStart = Number.isFinite(activeDomain[0])
+      ? activeDomain[0]
+      : undefined;
+    const activeDomainStop = Number.isFinite(activeDomain[1])
+      ? activeDomain[1]
+      : undefined;
+    useEffect(() => {
+      onActiveXDomainChange?.(
+        activeDomainStart !== undefined && activeDomainStop !== undefined
+          ? [activeDomainStart, activeDomainStop]
+          : undefined
+      );
+    }, [activeDomainStart, activeDomainStop, onActiveXDomainChange]);
 
     if (processedChartItems.length === 0)
       return <div className={Styles.empty}>No data available</div>;

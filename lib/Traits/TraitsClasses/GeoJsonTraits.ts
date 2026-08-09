@@ -2,6 +2,7 @@ import { JsonObject } from "../../Core/Json";
 import anyTrait from "../Decorators/anyTrait";
 import objectArrayTrait from "../Decorators/objectArrayTrait";
 import objectTrait from "../Decorators/objectTrait";
+import primitiveArrayTrait from "../Decorators/primitiveArrayTrait";
 import primitiveTrait from "../Decorators/primitiveTrait";
 import mixTraits from "../mixTraits";
 import ModelTraits from "../ModelTraits";
@@ -115,6 +116,26 @@ export class GeoJsonTraits extends mixTraits(
       "The property of each GeoJSON feature that specifies which point in time that feature is associated with. If not specified, it is assumed that the dataset is constant throughout time. This is only supported for cesium primitives (see `forceCesiumPrimitives`). If using geojson-vt styling, use TableTraits instead (see `TableStyleTraits` and `TableTimeStyleTraits`)"
   })
   timeProperty?: string;
+
+  @primitiveArrayTrait({
+    name: "Extra discrete times",
+    type: "string",
+    description:
+      "Additional discrete time instants (ISO 8601 strings) unioned into this layer's " +
+      "time model alongside the instants derived from `timeProperty`. Use for observation " +
+      "instants that produced NO feature (e.g. satellite passes with no detection): the " +
+      "timeline can then land on them, and each feature's availability window closes at " +
+      "the NEXT known observation rather than the next feature — so an instant with no " +
+      "feature honestly shows an empty layer instead of carrying the previous feature " +
+      "forward. Instants equal (after ISO normalisation) to a feature instant are " +
+      "deduplicated; unparsable strings are skipped. Only applies when `timeProperty` is " +
+      "set on the cesium-primitives path; ignored for geojson-vt/protomaps table styling. " +
+      "COMPOSITION NOTE: a trailing extra (an observation AFTER the last feature) makes " +
+      "`stopTime` an empty instant, and the default `initialTimeSource` resolves the boot " +
+      "clock there — pair this trait with an explicit `currentTime` (e.g. the newest " +
+      "feature instant) or the layer boots honestly EMPTY."
+  })
+  extraDiscreteTimes?: string[];
 
   @primitiveTrait({
     name: "Height property",

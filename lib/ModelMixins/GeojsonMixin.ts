@@ -1300,6 +1300,41 @@ function GeoJsonMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
           }
         }
 
+        // Union in `extraDiscreteTimes` (opt-in): observation instants that
+        // produced no feature (e.g. satellite passes with no detection). The
+        // timeline can then land on them, and — because entity availability is
+        // computed as [ownInstant, NEXT instant in discreteTimesAsSortedJulianDates)
+        // — each feature's window now closes at the next OBSERVATION rather than
+        // the next feature, so a no-feature instant shows an honestly empty
+        // layer instead of carrying the previous feature forward.
+        //
+        // Dedupe on the ISO-normalised INSTANT, feature entries first: an extra
+        // time equal to a feature instant must not create a second discrete
+        // step 0 ms away, and must never displace the feature's own entry (its
+        // `tag` is what the availability lookup matches the feature by).
+        // Unparsable strings are skipped, never thrown: a malformed instant
+        // from a catalog config degrades to "that step is absent", not a dead
+        // layer.
+        const extras = this.extraDiscreteTimes;
+        if (extras !== undefined && extras.length > 0) {
+          const seenInstants = new Set<string>();
+          for (const dt of discreteTimesMap.values()) {
+            seenInstants.add(dt.time);
+          }
+          for (const raw of extras) {
+            const ms = Date.parse(`${raw}`);
+            if (!Number.isFinite(ms)) continue;
+            const iso = new Date(ms).toISOString();
+            if (seenInstants.has(iso)) continue;
+            seenInstants.add(iso);
+            // Keyed by the normalised ISO so two equivalent spellings of the
+            // same extra instant also collapse to one discrete step. The tag
+            // matches no feature by construction (availability lookups are by
+            // feature tag), so this entry only adds a timeline step.
+            discreteTimesMap.set(iso, { time: iso, tag: iso });
+          }
+        }
+
         return Array.from(discreteTimesMap.values());
       }
     }
