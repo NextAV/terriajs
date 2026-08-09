@@ -49,12 +49,20 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       [viewState.terria]
     );
 
-    // Clear the shared chart x-domain window + plot-frac when the panel unmounts,
-    // so a stale zoom/gutter can't linger and mis-inset a later scrubber.
+    const setChartActiveXDomain = useCallback(
+      (domain: [number, number] | undefined) =>
+        viewState.terria.setBottomChartActiveXDomain(domain),
+      [viewState.terria]
+    );
+
+    // Clear the shared chart x-domain window + plot-frac + active domain when
+    // the panel unmounts, so a stale zoom/gutter/domain can't linger and
+    // mis-place a later scrubber.
     useEffect(
       () => () => {
         viewState.terria.setBottomChartXDomain(undefined);
         viewState.terria.setBottomChartPlotFrac(undefined);
+        viewState.terria.setBottomChartActiveXDomain(undefined);
       },
       [viewState.terria]
     );
@@ -145,6 +153,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           height={CHART_PANEL_HEIGHT - CHART_LEGEND_HEIGHT}
           onXDomainChange={setChartXDomain}
           onPlotFracChange={setChartPlotFrac}
+          onActiveXDomainChange={setChartActiveXDomain}
           selectedTimeMs={selectedTimeMs}
         />
       );
