@@ -1,6 +1,7 @@
 import { observer } from "mobx-react";
 import { forwardRef, useImperativeHandle } from "react";
 import { computeHitBounds } from "../../../Charts/barHitBounds";
+import { seriesBarWidth } from "../../../Charts/barSeriesWidth";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
 import type { ChartZoomHandle, Scales } from "./types";
@@ -10,6 +11,23 @@ interface Props {
   chartItem: ChartItem;
   scales: Scales;
   color?: string;
+  /**
+   * Position of this series among the bar series sharing the chart, and how many there
+   * are. Bar series are centred on their x, so co-located series would otherwise cover
+   * each other completely; each series after the first is drawn narrower so the one
+   * behind it stays visible. Defaults (0 / 1) make a single-series chart byte-identical.
+   */
+  seriesIndex?: number;
+  seriesCount?: number;
+  /**
+   * Whether this series draws the transparent click targets. With several bar series on
+   * one axis every series would otherwise draw its own, and the topmost layer decides
+   * every click — so a sparse series painted in front would resolve clicks to ITS
+   * nearest date rather than the date actually under the cursor. Exactly one series
+   * (the one whose x values tile the axis most finely) draws them. Defaults to true, so
+   * a single-series chart is byte-identical.
+   */
+  rendersHitLayer?: boolean;
 }
 
 // A bar fills this fraction of the gap to its nearest neighbour, leaving a small gutter so
@@ -57,7 +75,18 @@ function computeBarWidth(
  * LineChart's imperative path update) without touching y/height.
  */
 const _BarChart = forwardRef<ChartZoomHandle, Props>(
-  ({ id, chartItem, scales, color }, ref) => {
+  (
+    {
+      id,
+      chartItem,
+      scales,
+      color,
+      seriesIndex = 0,
+      seriesCount = 1,
+      rendersHitLayer = true
+    },
+    ref
+  ) => {
     const points = chartItem.points;
     // Only points whose x maps to a finite pixel and whose y is finite become a drawable
     // bar. Filter ONCE so the JSX render and the imperative doZoom iterate the same set —
@@ -81,12 +110,19 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
           // A mismatch means the DOM is mid-rebuild; skip this frame rather than
           // mis-assign widths across bars.
           if (vis.length !== bars.length) return;
-          const clickable = typeof chartItem.onClick === "function";
+          const clickable =
+            typeof chartItem.onClick === "function" && rendersHitLayer;
           const hit = clickable
             ? document.querySelectorAll<SVGRectElement>(`#${id} rect.bar-hit`)
             : null;
           if (hit && hit.length !== bars.length) return;
-          const width = computeBarWidth(bars, zoomed.x);
+          // Inset AFTER re-measuring the band, so the nesting holds at every zoom level
+          // rather than only at the initial scale.
+          const width = seriesBarWidth(
+            computeBarWidth(bars, zoomed.x),
+            seriesIndex,
+            seriesCount
+          );
           // Recomputed from the ZOOMED mapping: the tiling depends on pixel spacing,
           // which zoom changes, so a hit area computed at the initial scale would
           // drift out from under its bar as soon as the user zooms.
@@ -111,11 +147,15 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       // filtered through scales.x — the handle must rebuild if the scale changes so
       // the rect node order stays aligned with `bars`; and `chartItem` because
       // doZoom now branches on `chartItem.onClick` (whether hit rects exist).
-      [id, bars, scales, chartItem]
+      [id, bars, scales, chartItem, seriesIndex, seriesCount, rendersHitLayer]
     );
 
     const fill = color || chartItem.getColor();
-    const width = computeBarWidth(bars, scales.x);
+    const width = seriesBarWidth(
+      computeBarWidth(bars, scales.x),
+      seriesIndex,
+      seriesCount
+    );
     // Anchor at the plot bottom (the larger end of the inverted [height, 0] y-range).
     // A bar's HEIGHT is baseline - scales.y(value), so it is proportional to `value`
     // only when the y-domain includes 0 (then scales.y(0) == baseline). calculateDomainY
@@ -129,6 +169,9 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
     const hitBounds = computeHitBounds(bars, scales.x);
     // A bar chart of a time series is clickable — the chart item's onClick (set by
     // TableMixin for `chartType:"bar"`) scrubs the timeline to the bar's date.
+    // Bound whether or not this series draws the hit layer: a click landing on a VISIBLE
+    // bar hits that rect and bubbles only through its own ancestors, never to a sibling
+    // series' hit rect — so dropping this would make the front series' bars dead.
     const onBarClick =
       typeof chartItem.onClick === "function"
         ? (p: ChartPoint) => chartItem.onClick(p)
@@ -148,7 +191,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
               {/* Full-height transparent hit area so a thin bar is easy to click.
                   Rendered only when clickable so it never intercepts hover/zoom on a
                   non-interactive bar chart. */}
-              {onBarClick && hitBounds[i] && (
+              {onBarClick && rendersHitLayer && hitBounds[i] && (
                 <rect
                   className="bar-hit"
                   x={hitBounds[i]!.x}

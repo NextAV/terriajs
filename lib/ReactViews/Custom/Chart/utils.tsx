@@ -1,7 +1,13 @@
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { Line } from "@visx/shape";
 import { observer } from "mobx-react";
-import { memo, useEffect, useRef, type ComponentPropsWithoutRef } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  type ComponentPropsWithoutRef
+} from "react";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
 import BarChart from "./BarChart";
 import LineAndPointChart from "./LineAndPointChart";
@@ -24,6 +30,32 @@ interface PlotProps {
 export const Plot = memo(
   ({ chartItems, initialScales, zoomedScales }: PlotProps) => {
     const chartRefs = useRef<{ id: string; zoomHandle: ChartZoomHandle }[]>([]);
+
+    // Bar series are centred on their x, so several on one axis land on the SAME pixels
+    // and the later-painted one covers the earlier one wherever its value is greater or
+    // equal. Give each its position among the bar series so BarChart can inset them
+    // (declaration order = paint order = widest-to-narrowest, back-to-front), and let
+    // exactly ONE draw the shared click targets — the series with the most points, whose
+    // tiling of the axis is the finest, so a click resolves to the x actually under the
+    // cursor instead of a sparse front series' nearest point. Both are inert for a
+    // single bar series, which is every chart that exists today bar one.
+    const barPositions = useMemo(() => {
+      const indices = chartItems
+        .map((c, i) => (c.type === "bar" ? i : -1))
+        .filter((i) => i >= 0);
+      let hitLayerIndex = -1;
+      let mostPoints = -1;
+      indices.forEach((i) => {
+        const n = chartItems[i].points.length;
+        if (n > mostPoints) {
+          mostPoints = n;
+          hitLayerIndex = i;
+        }
+      });
+      const order = new Map<number, number>();
+      indices.forEach((i, order_) => order.set(i, order_));
+      return { order, count: indices.length, hitLayerIndex };
+    }, [chartItems]);
 
     useEffect(() => {
       chartRefs.current?.forEach((ref, i) => {
@@ -64,6 +96,11 @@ export const Plot = memo(
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
+                  seriesIndex={barPositions.order.get(i) ?? 0}
+                  seriesCount={barPositions.count}
+                  rendersHitLayer={
+                    barPositions.count < 2 || barPositions.hitLayerIndex === i
+                  }
                 />
               );
             case "momentPoints": {
