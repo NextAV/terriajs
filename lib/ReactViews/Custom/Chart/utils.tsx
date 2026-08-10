@@ -56,9 +56,16 @@ export const Plot = memo(
       // per-series makes the "each series is narrower than the one behind it" guarantee
       // depend on which series happens to hold the tightest pair — it then silently stops
       // holding on data that merely looks different.
+      // y-filtered to match what BarChart actually DRAWS. A point with a finite x but a
+      // non-finite y is never rendered as a bar, yet left in the band source it tightens
+      // the band for every series on the chart (measured 7.00px -> 2.10px, 70% thinner)
+      // — a bar that does not exist making every bar that does exist thinner. The x
+      // filter stays in BarChart, where the scale is.
       const bandPoints =
         indices.length > 1
-          ? indices.flatMap((i) => chartItems[i].points)
+          ? indices.flatMap((i) =>
+              chartItems[i].points.filter((p) => Number.isFinite(p.y))
+            )
           : undefined;
       return {
         order,
