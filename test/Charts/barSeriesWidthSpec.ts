@@ -1,6 +1,5 @@
 import {
   MIN_SERIES_BAR_WIDTH,
-  SERIES_INSET_FRACTION,
   seriesBarWidth
 } from "../../lib/Charts/barSeriesWidth";
 
@@ -41,8 +40,42 @@ describe("seriesBarWidth", function () {
     }
   });
 
-  it("insets by the declared fraction of the band", function () {
-    expect(seriesBarWidth(100, 1, 2)).toBe(100 * (1 - SERIES_INSET_FRACTION));
+  it("REGRESSION: is STRICTLY decreasing while the band can carry the series", function () {
+    // A floor alone is not enough and passing it is not evidence of anything: a
+    // per-step shrink that saturates at zero gave every series from index 3 on the
+    // SAME floored width, i.e. total occlusion again — and the old "never shrinks to
+    // nothing" loop passed the whole time (guardian WARN-3). Assert the property that
+    // actually matters, over the whole regime where it is achievable.
+    for (let n = 2; n <= 8; n++) {
+      const band = n * MIN_SERIES_BAR_WIDTH * 4;
+      const widths = Array.from({ length: n }, (_, i) =>
+        seriesBarWidth(band, i, n)
+      );
+      widths.slice(1).forEach((w, k) => {
+        expect(w).toBeLessThan(widths[k]);
+      });
+    }
+  });
+
+  it("never INVERTS: a floored series is never wider than the one behind it", function () {
+    // Below the floor the widths may TIE (the band cannot carry them), but the front
+    // series must never come out wider — which `max(MIN, ...)` alone allows.
+    [0.1, 0.5, 0.75, 1, 1.5250783699].forEach((band) => {
+      for (let n = 2; n <= 5; n++) {
+        const widths = Array.from({ length: n }, (_, i) =>
+          seriesBarWidth(band, i, n)
+        );
+        widths.slice(1).forEach((w, k) => {
+          expect(w <= widths[k]).toBe(true);
+        });
+      }
+    });
+  });
+
+  it("insets proportionally to the band, so the shrink cannot saturate", function () {
+    expect(seriesBarWidth(100, 1, 2)).toBe(50);
+    expect(seriesBarWidth(100, 1, 4)).toBe(75);
+    expect(seriesBarWidth(100, 3, 4)).toBe(25);
   });
 
   it("passes a degenerate band through untouched rather than inventing a width", function () {

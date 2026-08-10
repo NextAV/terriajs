@@ -34,27 +34,38 @@ export const Plot = memo(
     // Bar series are centred on their x, so several on one axis land on the SAME pixels
     // and the later-painted one covers the earlier one wherever its value is greater or
     // equal. Give each its position among the bar series so BarChart can inset them
-    // (declaration order = paint order = widest-to-narrowest, back-to-front), and let
-    // exactly ONE draw the shared click targets — the series with the most points, whose
-    // tiling of the axis is the finest, so a click resolves to the x actually under the
-    // cursor instead of a sparse front series' nearest point. Both are inert for a
-    // single bar series, which is every chart that exists today bar one.
+    // (declaration order = paint order = widest-to-narrowest, back-to-front), share ONE
+    // set of points to measure the band from, and let exactly ONE draw the click targets.
+    //
+    // The hit layer goes to the BACKMOST bar series, never to "the one with the most
+    // points". A full-height hit rect is a PAINTED element (`fill="transparent"` still
+    // satisfies `pointer-events: visiblePainted`), so whichever series draws it last owns
+    // every click on the plot: the series behind it become unclickable and clicks resolve
+    // to the wrong series' nearest point. Drawn by the backmost series it can cover
+    // nothing. This is why the composer must declare the series with the finest x tiling
+    // first — it is both the backdrop and the click surface.
+    //
+    // All inert for a single bar series, which is every chart that exists today bar one.
     const barPositions = useMemo(() => {
       const indices = chartItems
         .map((c, i) => (c.type === "bar" ? i : -1))
         .filter((i) => i >= 0);
-      let hitLayerIndex = -1;
-      let mostPoints = -1;
-      indices.forEach((i) => {
-        const n = chartItems[i].points.length;
-        if (n > mostPoints) {
-          mostPoints = n;
-          hitLayerIndex = i;
-        }
-      });
       const order = new Map<number, number>();
-      indices.forEach((i, order_) => order.set(i, order_));
-      return { order, count: indices.length, hitLayerIndex };
+      indices.forEach((i, position) => order.set(i, position));
+      // Measured from the union, so every series insets from the SAME band. Deriving it
+      // per-series makes the "each series is narrower than the one behind it" guarantee
+      // depend on which series happens to hold the tightest pair — it then silently stops
+      // holding on data that merely looks different.
+      const bandPoints =
+        indices.length > 1
+          ? indices.flatMap((i) => chartItems[i].points)
+          : undefined;
+      return {
+        order,
+        count: indices.length,
+        hitLayerIndex: indices.length > 0 ? indices[0] : -1,
+        bandPoints
+      };
     }, [chartItems]);
 
     useEffect(() => {
@@ -101,6 +112,7 @@ export const Plot = memo(
                   rendersHitLayer={
                     barPositions.count < 2 || barPositions.hitLayerIndex === i
                   }
+                  bandPoints={barPositions.bandPoints}
                 />
               );
             case "momentPoints": {

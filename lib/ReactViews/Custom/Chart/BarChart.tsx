@@ -21,13 +21,23 @@ interface Props {
   seriesCount?: number;
   /**
    * Whether this series draws the transparent click targets. With several bar series on
-   * one axis every series would otherwise draw its own, and the topmost layer decides
-   * every click — so a sparse series painted in front would resolve clicks to ITS
-   * nearest date rather than the date actually under the cursor. Exactly one series
-   * (the one whose x values tile the axis most finely) draws them. Defaults to true, so
-   * a single-series chart is byte-identical.
+   * one axis every series would otherwise draw its own, and a full-height hit rect is a
+   * PAINTED element (`fill="transparent"` still satisfies `pointer-events:
+   * visiblePainted`), so the last one painted becomes the click target for the whole plot
+   * — making every earlier series' bars unclickable and resolving clicks to the wrong
+   * series' nearest point. Exactly one series draws them, and it must be the BACKMOST,
+   * where it cannot cover anything. Defaults to true: a single-series chart is
+   * byte-identical.
    */
   rendersHitLayer?: boolean;
+  /**
+   * The x values the bar WIDTH is measured from. Must be the union across every bar
+   * series on the chart, so all series share one band and the inset is a structural
+   * guarantee rather than a coincidence of which series happens to contain the tightest
+   * pair. Omitted (single-series charts) → measured from this series' own bars, which is
+   * the historical behaviour.
+   */
+  bandPoints?: readonly ChartPoint[];
 }
 
 // A bar fills this fraction of the gap to its nearest neighbour, leaving a small gutter so
@@ -83,7 +93,8 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       color,
       seriesIndex = 0,
       seriesCount = 1,
-      rendersHitLayer = true
+      rendersHitLayer = true,
+      bandPoints
     },
     ref
   ) => {
@@ -119,7 +130,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
           // Inset AFTER re-measuring the band, so the nesting holds at every zoom level
           // rather than only at the initial scale.
           const width = seriesBarWidth(
-            computeBarWidth(bars, zoomed.x),
+            computeBarWidth(bandPoints ?? bars, zoomed.x),
             seriesIndex,
             seriesCount
           );
@@ -147,12 +158,24 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       // filtered through scales.x — the handle must rebuild if the scale changes so
       // the rect node order stays aligned with `bars`; and `chartItem` because
       // doZoom now branches on `chartItem.onClick` (whether hit rects exist).
-      [id, bars, scales, chartItem, seriesIndex, seriesCount, rendersHitLayer]
+      [
+        id,
+        bars,
+        scales,
+        chartItem,
+        seriesIndex,
+        seriesCount,
+        rendersHitLayer,
+        bandPoints
+      ]
     );
 
     const fill = color || chartItem.getColor();
+    // Band from the SHARED points (all bar series) so every series insets from the same
+    // basis; per-series bands made the "each series is narrower than the one behind it"
+    // guarantee depend on which series happened to hold the tightest pair.
     const width = seriesBarWidth(
-      computeBarWidth(bars, scales.x),
+      computeBarWidth(bandPoints ?? bars, scales.x),
       seriesIndex,
       seriesCount
     );
