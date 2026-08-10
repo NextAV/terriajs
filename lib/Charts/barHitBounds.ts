@@ -40,8 +40,20 @@ export function computeHitBounds(
   );
   for (let k = 0; k < order.length; k++) {
     const i = order[k];
-    const prev = k > 0 ? px[order[k - 1]] : undefined;
-    const next = k < order.length - 1 ? px[order[k + 1]] : undefined;
+    // Step over bars sharing this exact pixel (a zoom can collapse two points
+    // onto one). Taking the immediate neighbour instead would give a coincident
+    // bar a half-gap of ZERO, and with a half-open tile that excludes its own
+    // centre — so the pixel the user aimed at would belong to no tile. Skipping
+    // to the nearest DISTINCT pixel gives every bar at a shared pixel the same
+    // tile, which is the honest answer: they are indistinguishable on screen.
+    // (`computeBarWidth` in BarChart.tsx excludes coincident pixels for the
+    // same reason.)
+    let kp = k - 1;
+    while (kp >= 0 && px[order[kp]] === px[i]) kp--;
+    let kn = k + 1;
+    while (kn < order.length && px[order[kn]] === px[i]) kn++;
+    const prev = kp >= 0 ? px[order[kp]] : undefined;
+    const next = kn < order.length ? px[order[kn]] : undefined;
     // A lone bar (or the outer edge of the series) has no neighbour on that side, so
     // it borrows the other side's half-gap and falls back to the cap when it has
     // neither — never an unbounded target.

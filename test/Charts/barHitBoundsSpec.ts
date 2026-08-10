@@ -49,6 +49,28 @@ describe("computeHitBounds", function () {
     });
   });
 
+  it("contains its own centre even when bars share a pixel", function () {
+    // Guardian's breaking input for the first version: the middle bar's right
+    // half-gap was 0, producing the half-open tile [5,10) — which excludes the
+    // very pixel the user aimed at. Every bar must contain its own centre, and
+    // bars sharing a pixel must share a tile (they are indistinguishable).
+    [
+      [0, 10, 10],
+      [0, 10, 10, 20],
+      [10, 10],
+      [0, 0, 10]
+    ].forEach((xs) => {
+      const b = computeHitBounds(pts(xs), identity);
+      xs.forEach((x, i) => {
+        const r = b[i]!;
+        expect(x >= r.x && x < r.x + r.width).toBe(true);
+      });
+    });
+    const shared = computeHitBounds(pts([0, 10, 10, 20]), identity);
+    expect(shared[1]!.x).toBe(shared[2]!.x);
+    expect(shared[1]!.width).toBe(shared[2]!.width);
+  });
+
   it("does NOT overlap when bars are closer together than the old 10px floor", function () {
     // The regression this replaces: a fixed >= 10px width on bars ~2.5px apart
     // made ~4 tiles cover the same pixel, so DOM paint order decided the click.
