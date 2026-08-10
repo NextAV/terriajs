@@ -1,7 +1,13 @@
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { Line } from "@visx/shape";
 import { observer } from "mobx-react";
-import { memo, useEffect, useRef, type ComponentPropsWithoutRef } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  type ComponentPropsWithoutRef
+} from "react";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
 import BarChart from "./BarChart";
 import LineAndPointChart from "./LineAndPointChart";
@@ -24,6 +30,50 @@ interface PlotProps {
 export const Plot = memo(
   ({ chartItems, initialScales, zoomedScales }: PlotProps) => {
     const chartRefs = useRef<{ id: string; zoomHandle: ChartZoomHandle }[]>([]);
+
+    // Bar series are centred on their x, so several on one axis land on the SAME pixels
+    // and the later-painted one covers the earlier one wherever its value is greater or
+    // equal. Give each its position among the bar series so BarChart can inset them
+    // (declaration order = paint order = widest-to-narrowest, back-to-front), share ONE
+    // set of points to measure the band from, and let exactly ONE draw the click targets.
+    //
+    // The hit layer goes to the BACKMOST bar series, never to "the one with the most
+    // points". A full-height hit rect is a PAINTED element (`fill="transparent"` still
+    // satisfies `pointer-events: visiblePainted`), so whichever series draws it last owns
+    // every click on the plot: the series behind it become unclickable and clicks resolve
+    // to the wrong series' nearest point. Drawn by the backmost series it can cover
+    // nothing. This is why the composer must declare the series with the finest x tiling
+    // first — it is both the backdrop and the click surface.
+    //
+    // All inert for a single bar series, which is every chart that exists today bar one.
+    const barPositions = useMemo(() => {
+      const indices = chartItems
+        .map((c, i) => (c.type === "bar" ? i : -1))
+        .filter((i) => i >= 0);
+      const order = new Map<number, number>();
+      indices.forEach((i, position) => order.set(i, position));
+      // Measured from the union, so every series insets from the SAME band. Deriving it
+      // per-series makes the "each series is narrower than the one behind it" guarantee
+      // depend on which series happens to hold the tightest pair — it then silently stops
+      // holding on data that merely looks different.
+      // y-filtered to match what BarChart actually DRAWS. A point with a finite x but a
+      // non-finite y is never rendered as a bar, yet left in the band source it tightens
+      // the band for every series on the chart (measured 7.00px -> 2.10px, 70% thinner)
+      // — a bar that does not exist making every bar that does exist thinner. The x
+      // filter stays in BarChart, where the scale is.
+      const bandPoints =
+        indices.length > 1
+          ? indices.flatMap((i) =>
+              chartItems[i].points.filter((p) => Number.isFinite(p.y))
+            )
+          : undefined;
+      return {
+        order,
+        count: indices.length,
+        hitLayerIndex: indices.length > 0 ? indices[0] : -1,
+        bandPoints
+      };
+    }, [chartItems]);
 
     useEffect(() => {
       chartRefs.current?.forEach((ref, i) => {
@@ -64,6 +114,12 @@ export const Plot = memo(
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
+                  seriesIndex={barPositions.order.get(i) ?? 0}
+                  seriesCount={barPositions.count}
+                  rendersHitLayer={
+                    barPositions.count < 2 || barPositions.hitLayerIndex === i
+                  }
+                  bandPoints={barPositions.bandPoints}
                 />
               );
             case "momentPoints": {
