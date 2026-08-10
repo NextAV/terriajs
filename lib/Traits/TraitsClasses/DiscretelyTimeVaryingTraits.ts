@@ -39,4 +39,17 @@ export default class DiscretelyTimeVaryingTraits extends mixTraits(
     type: "number"
   })
   multiplierDefaultDeltaStep?: number = 2;
+
+  @primitiveTrait({
+    type: "boolean",
+    name: "Hide outside own discrete times",
+    description:
+      "When true, this layer renders NOTHING at a clock instant that is not one of its own discrete times, instead of falling back to the `fromContinuous` neighbour. " +
+      "Default false — every layer keeps the historical nearest/next/previous behaviour. " +
+      "Turn it on for a CONTEXT raster whose instants are a strict SUBSET of the timeline driver's: the driver can then land on an instant this layer has no frame for, and the honest answer is an empty backdrop, not a frame from another date. " +
+      "The al-shaheen case that motivated it: the SAR candidate layer's time model was unioned with every satellite pass (233 instants) while the radar backdrop still rendered 34 frames, so stepping to a no-detection pass painted the radar frame from a DIFFERENT date — one that visibly contained slicks — under a map that correctly showed no detections. " +
+      "Comparison is at SECOND granularity, so the sub-second spelling differences between independently-produced instant lists do not cause a spurious hide. " +
+      "FAIL-OPEN: a layer with no discrete times, or no resolved current time, is never hidden by this trait."
+  })
+  hideOutsideDiscreteTimes: boolean = false;
 }

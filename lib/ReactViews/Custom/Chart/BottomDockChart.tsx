@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
+import { chartDataSignature } from "./chartDataSignature";
 import Legends from "./Legends";
 import Tooltip from "./Tooltip";
 import type { XScale, YScale } from "./types";
@@ -335,10 +336,36 @@ const Chart: React.FC<ChartProps> = observer(
       });
     };
 
+    // A zoom is a USER gesture: it must survive any re-render that does not
+    // change what is plotted. This reset used to key on the `processedChartItems`
+    // ARRAY IDENTITY, which is a new object on every parent render — `ChartPanel`
+    // builds its `chartItems` with `.filter(...)`, and `.filter` always
+    // allocates. Since `ChartPanel` is a mobx `observer` that reads the timeline
+    // clock (for the selected-date marker), EVERY scrub re-rendered it and so
+    // cleared the zoom. Clicking a bar scrubs the clock, so the user's own click
+    // zoomed the chart back out — and `onXDomainChange?.(undefined)` fired with
+    // it, resetting the published domain, which de-synced any scrubber aligned
+    // to it. Reported 2026-08-10 on al-shaheen; the defect is tenant-agnostic
+    // (any dashboard whose chart panel re-renders for an unrelated reason).
+    //
+    // Key on a stable SIGNATURE of the plotted data plus the plot geometry:
+    //  - series key + point count + x-extent → a genuine data change (series
+    //    added/removed, different span) still resets, which is correct: the old
+    //    zoom window may no longer exist in the new domain.
+    //  - `plotWidth` → a resize invalidates `zoomedXScale`, whose d3 range was
+    //    built against the OLD width; without this the chart would keep drawing
+    //    at the stale range. (The identity-keyed version got this for free.)
+    // Values changing under an unchanged extent deliberately does NOT reset —
+    // the zoom window is still valid, so the user keeps their view.
+    const chartDataKey = useMemo(
+      () => chartDataSignature(processedChartItems),
+      [processedChartItems]
+    );
+
     useEffect(() => {
       setZoomedXScale(undefined);
       onXDomainChange?.(undefined);
-    }, [processedChartItems, onXDomainChange]);
+    }, [chartDataKey, plotWidth, onXDomainChange]);
 
     // Publish the plot-area fractions for a plot-aligned scrubber. Done in an
     // effect (not during render) to avoid a mobx write-in-render when the

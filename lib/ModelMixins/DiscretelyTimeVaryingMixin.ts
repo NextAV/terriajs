@@ -205,6 +205,43 @@ function DiscretelyTimeVaryingMixin<
         : this.discreteTimesAsSortedJulianDates![index].time;
     }
 
+    /**
+     * True when `hideOutsideDiscreteTimes` is on AND the current clock instant
+     * is not one of this layer's own discrete times — i.e. the only frame this
+     * layer could show belongs to a DIFFERENT instant.
+     *
+     * Consumers (see `WebMapTileServiceCatalogItem.mapItems`) render nothing
+     * when this is true. The trait is opt-in and defaults false, so every
+     * existing layer keeps the `fromContinuous` nearest/next/previous
+     * behaviour byte-for-byte.
+     *
+     * Implementation notes:
+     * - O(1): it compares the clock against the ALREADY-computed
+     *   `currentDiscreteJulianDate` (itself a binary search) rather than
+     *   scanning the discrete times, so it stays cheap on a layer with a
+     *   large time dimension and during timeline animation.
+     * - SECOND granularity. Two independently-produced instant lists (a
+     *   backend env list and a database column, say) routinely differ in
+     *   sub-second spelling for the same acquisition; comparing exactly would
+     *   hide a layer that genuinely has the frame. One second is far below
+     *   any real revisit interval, so it cannot merge two distinct instants.
+     * - FAIL-OPEN: no current time, or no discrete times, returns false. A
+     *   layer is never blanked because its time model has not resolved yet.
+     */
+    @computed
+    get isOutsideOwnDiscreteTimes(): boolean {
+      if (this.hideOutsideDiscreteTimes !== true) return false;
+      const current = this.currentTimeAsJulianDate;
+      const nearest = this.currentDiscreteJulianDate;
+      if (current === undefined || nearest === undefined) return false;
+      return (
+        Math.abs(
+          JulianDate.toDate(nearest).getTime() -
+            JulianDate.toDate(current).getTime()
+        ) >= 1000
+      );
+    }
+
     @computed({ equals: JulianDate.equals })
     get nextDiscreteJulianDate() {
       const index = this.nextDiscreteTimeIndex;

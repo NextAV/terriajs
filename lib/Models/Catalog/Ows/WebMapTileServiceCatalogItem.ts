@@ -1153,6 +1153,15 @@ class WebMapTileServiceCatalogItem extends MappableMixin(
 
   @computed
   get mapItems(): MapItem[] {
+    // Opt-in honesty gate (default off → every existing layer unchanged): when
+    // the clock sits on an instant this layer has no frame for, show NOTHING
+    // rather than the `fromContinuous` neighbour. Without it a sparse context
+    // raster under a denser timeline driver paints another date's image as if
+    // it were this date's — see `hideOutsideDiscreteTimes`.
+    if (this.isOutsideOwnDiscreteTimes) {
+      return [];
+    }
+
     const result: MapItem[] = [];
 
     const current = this._currentImageryParts;
