@@ -19,15 +19,23 @@
  *
  * The correct relation is CONTAINMENT, not proximity: an instant belongs to the
  * period it falls inside, `[columnStart, columnStart + span)`. That is what
- * these helpers implement, in both directions, from one predicate — so a bar
- * click and the "selected time" marker drawn on that chart can never disagree.
+ * these helpers implement, in both directions.
  *
- * Basis note: containment assumes a bar's x is at or before its own instants —
- * true when the x values are period STARTS in the same (or a behind-UTC) frame
- * as the instants, which covers ISO date-only columns (`Date.parse` → UTC
- * midnight) and local-midnight parses at non-negative UTC offsets. Both
- * functions return `undefined` when nothing is contained, so a caller in an
- * unsupported frame falls back to its previous behaviour rather than breaking.
+ * Agreement between a bar click and the chart's "selected time" marker rests on
+ * both using this predicate AND on each real instant lying inside its own
+ * column. It is NOT guaranteed by the shared predicate alone: the two callers
+ * measure `span` from different inputs (the clicked series' points vs every bar
+ * series flattened), so a chart mixing bar series of different periods could in
+ * principle have them disagree. Align the span source if that case ever arises.
+ *
+ * Basis note — what containment does NOT cover. It assumes a bar's x is at or
+ * before its own instants, which holds when x values are period STARTS in the
+ * same frame as the instants (ISO date-only columns: `Date.parse` → UTC
+ * midnight) or in a frame behind it. Where that fails, the failure is SILENT
+ * rather than a fallback: an instant earlier than its own column's start is
+ * simply contained by the ADJACENT column, and both directions agree on that
+ * wrong column, so nothing returns `undefined`. `undefined` is returned only
+ * when NO column contains the instant at all.
  */
 
 /** One day in ms — the default column span when it cannot be measured. */
@@ -81,8 +89,13 @@ export function instantForColumn(
 }
 
 /**
- * The inverse: the column start that OWNS `instantMs` — the largest
- * `columnStartsMs` value with `start <= instantMs < start + spanMs`.
+ * The column start that OWNS `instantMs` — the largest `columnStartsMs` value
+ * with `start <= instantMs < start + spanMs`.
+ *
+ * A ONE-SIDED inverse of `instantForColumn`, not a true one: `column → instant
+ * → column` is the identity (the direction both callers rely on), while
+ * `instant → column → instant` collapses a period holding two observations onto
+ * the earlier of them.
  *
  * Used to draw a "selected time" marker on the bar it belongs to rather than at
  * the instant's own x, which on a daily chart sits up to a full period to the

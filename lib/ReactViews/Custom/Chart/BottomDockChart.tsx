@@ -280,8 +280,8 @@ const Chart: React.FC<ChartProps> = observer(
     // belongs to — on the al-Shaheen daily chart the ~14:30Z ascending passes
     // land a median 0.61 day past their own bar. Snap to the column that
     // CONTAINS the instant, using the same predicate the bar click uses
-    // (lib/Charts/barColumnSnap.ts), so the marker and the click can never
-    // disagree about which bar a time belongs to. Falls back to the instant's
+    // (lib/Charts/barColumnSnap.ts) — see that module on why agreement rests on
+    // each instant lying in its own column, not on the predicate alone. Falls back to the instant's
     // exact x when no column contains it (a non-bar chart, or a frame the
     // containment rule does not cover) — previous behaviour, unchanged.
     // Only BAR items define columns; with none (a line-only chart) the list is
