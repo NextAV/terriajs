@@ -8,6 +8,10 @@ import groupBy from "lodash-es/groupBy";
 import minBy from "lodash-es/minBy";
 import { observer } from "mobx-react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  columnForInstant,
+  columnSpanMs
+} from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
@@ -271,11 +275,41 @@ const Chart: React.FC<ChartProps> = observer(
     // falls outside the visible domain → the marker HIDES rather than pinning a
     // misleading marker to an edge. A clock time genuinely > 1 day outside the
     // visible range draws no marker.
+    // A bar sits at the START of its period, so drawing the marker at the
+    // instant's own x puts it up to a full period to the RIGHT of the bar it
+    // belongs to — on the al-Shaheen daily chart the ~14:30Z ascending passes
+    // land a median 0.61 day past their own bar. Snap to the column that
+    // CONTAINS the instant, using the same predicate the bar click uses
+    // (lib/Charts/barColumnSnap.ts), so the marker and the click can never
+    // disagree about which bar a time belongs to. Falls back to the instant's
+    // exact x when no column contains it (a non-bar chart, or a frame the
+    // containment rule does not cover) — previous behaviour, unchanged.
+    // Only BAR items define columns; with none (a line-only chart) the list is
+    // empty, `columnForInstant` returns undefined and the marker keeps its
+    // exact-instant x — byte-identical to before for every non-bar chart.
+    const barColumns = useMemo(() => {
+      const starts = processedChartItems
+        .filter((c) => c.type === "bar")
+        .flatMap((c) =>
+          c.points.map((p) =>
+            p.x instanceof Date ? p.x.getTime() : Number(p.x)
+          )
+        );
+      return { starts, spanMs: columnSpanMs(starts) };
+    }, [processedChartItems]);
+    const markerTimeMs =
+      selectedTimeMs != null && Number.isFinite(selectedTimeMs)
+        ? columnForInstant(
+            selectedTimeMs,
+            barColumns.starts,
+            barColumns.spanMs
+          ) ?? selectedTimeMs
+        : selectedTimeMs;
     const selectedX =
-      selectedTimeMs != null &&
-      Number.isFinite(selectedTimeMs) &&
+      markerTimeMs != null &&
+      Number.isFinite(markerTimeMs) &&
       xAxis.scale === "time"
-        ? xScale(selectedTimeMs)
+        ? xScale(markerTimeMs)
         : undefined;
     const DAY_MS = 24 * 60 * 60 * 1000;
     // `xScale.domain()` may return Date[] or number[] (scaleTime) → coerce via

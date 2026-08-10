@@ -13,6 +13,7 @@ import JulianDate from "terriajs-cesium/Source/Core/JulianDate";
 import CustomDataSource from "terriajs-cesium/Source/DataSources/CustomDataSource";
 import DataSource from "terriajs-cesium/Source/DataSources/DataSource";
 import ImageryProvider from "terriajs-cesium/Source/Scene/ImageryProvider";
+import { columnSpanMs, instantForColumn } from "../Charts/barColumnSnap";
 import { ChartPoint } from "../Charts/ChartData";
 import getChartColorForId from "../Charts/getChartColorForId";
 import AbstractConstructor from "../Core/AbstractConstructor";
@@ -466,15 +467,49 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
                       // slider to move; leave the clock where it is rather than
                       // jumping to a synthetic midnight timestamp.
                       if (!discretes || !discretes.length) return;
+                      const instantsMs = discretes.map((d) =>
+                        JulianDate.toDate(d.time).getTime()
+                      );
+                      // A bar sits at the START of its period (a daily column
+                      // `2026-05-08` is `2026-05-08T00:00:00Z`) while the
+                      // instants are the real observations INSIDE it
+                      // (`…T14:32:37Z`). So the relation is CONTAINMENT, not
+                      // proximity — by "nearest", any period whose observation
+                      // falls in its second half resolves to the PREVIOUS
+                      // period's observation. Measured on the al-Shaheen S1
+                      // archive that was 56 of 228 daily bars (25%) selecting
+                      // the wrong day. See lib/Charts/barColumnSnap.ts.
+                      const spanMs = columnSpanMs(
+                        points.map((p) =>
+                          p.x instanceof Date ? p.x.getTime() : Number(p.x)
+                        )
+                      );
+                      const containedMs = instantForColumn(
+                        clickMs,
+                        instantsMs,
+                        spanMs
+                      );
                       let target: JulianDate | undefined;
-                      let bestDiff = Infinity;
-                      for (const d of discretes) {
-                        const diff = Math.abs(
-                          JulianDate.toDate(d.time).getTime() - clickMs
-                        );
-                        if (diff < bestDiff) {
-                          bestDiff = diff;
-                          target = d.time;
+                      if (containedMs !== undefined) {
+                        target =
+                          discretes[instantsMs.indexOf(containedMs)]?.time;
+                      }
+                      // Fall back to nearest when this bar's period holds no
+                      // instant — a real state (a period the timeline has no
+                      // instant for), and the frame-safety valve: a chart whose
+                      // x values are not period starts in a frame at or behind
+                      // the instants' matches nothing and keeps the previous
+                      // behaviour rather than going dead.
+                      if (!target) {
+                        let bestDiff = Infinity;
+                        for (const d of discretes) {
+                          const diff = Math.abs(
+                            JulianDate.toDate(d.time).getTime() - clickMs
+                          );
+                          if (diff < bestDiff) {
+                            bestDiff = diff;
+                            target = d.time;
+                          }
                         }
                       }
                       if (target && this.terria.timelineClock) {
