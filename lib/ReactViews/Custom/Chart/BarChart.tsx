@@ -1,5 +1,6 @@
 import { observer } from "mobx-react";
 import { forwardRef, useImperativeHandle } from "react";
+import { computeHitBounds } from "../../../Charts/barHitBounds";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
 import type { ChartZoomHandle, Scales } from "./types";
@@ -45,14 +46,6 @@ function computeBarWidth(
   return Math.min(MAX_BAR_WIDTH, Math.max(1, minGap * BAR_FILL_FRACTION));
 }
 
-// The transparent click hit area is a bit wider than the visible bar (min ~10px) so a
-// thin bar is still an easy click target, without widening the bar's visual footprint.
-// `barWidth / BAR_FILL_FRACTION` recovers ~the full inter-bar gap (the bar fills that
-// fraction of it), giving a per-date "column" hit target.
-function hitWidthFor(barWidth: number): number {
-  return Math.max(barWidth / BAR_FILL_FRACTION, 10);
-}
-
 /**
  * Vertical-bar renderer for discrete per-x counts (e.g. candidate detections per date).
  * A line implies continuity between samples that discrete daily counts don't have; bars
@@ -94,7 +87,10 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
             : null;
           if (hit && hit.length !== bars.length) return;
           const width = computeBarWidth(bars, zoomed.x);
-          const hitW = hitWidthFor(width);
+          // Recomputed from the ZOOMED mapping: the tiling depends on pixel spacing,
+          // which zoom changes, so a hit area computed at the initial scale would
+          // drift out from under its bar as soon as the user zooms.
+          const hitBounds = computeHitBounds(bars, zoomed.x);
           bars.forEach((p, i) => {
             const cx = zoomed.x(p.x);
             // Under X-only zoom a point that was finite at initial render stays
@@ -103,9 +99,10 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
             if (!Number.isFinite(cx)) return;
             vis[i].setAttribute("x", String(cx - width / 2));
             vis[i].setAttribute("width", String(width));
-            if (hit) {
-              hit[i].setAttribute("x", String(cx - hitW / 2));
-              hit[i].setAttribute("width", String(hitW));
+            const b = hitBounds[i];
+            if (hit && b) {
+              hit[i].setAttribute("x", String(b.x));
+              hit[i].setAttribute("width", String(b.width));
             }
           });
         }
@@ -129,7 +126,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
     const baseline = Math.max(r0, r1);
     const plotTop = Math.min(r0, r1);
     const plotHeight = Math.abs(r0 - r1);
-    const hitW = hitWidthFor(width);
+    const hitBounds = computeHitBounds(bars, scales.x);
     // A bar chart of a time series is clickable — the chart item's onClick (set by
     // TableMixin for `chartType:"bar"`) scrubs the timeline to the bar's date.
     const onBarClick =
@@ -151,12 +148,12 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
               {/* Full-height transparent hit area so a thin bar is easy to click.
                   Rendered only when clickable so it never intercepts hover/zoom on a
                   non-interactive bar chart. */}
-              {onBarClick && (
+              {onBarClick && hitBounds[i] && (
                 <rect
                   className="bar-hit"
-                  x={cx - hitW / 2}
+                  x={hitBounds[i]!.x}
                   y={plotTop}
-                  width={hitW}
+                  width={hitBounds[i]!.width}
                   height={plotHeight}
                   fill="transparent"
                 />
