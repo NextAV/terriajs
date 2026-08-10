@@ -11,6 +11,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
+import { zoomIdentity } from "d3-zoom";
+import { chartDataSignature } from "./chartDataSignature";
 import Legends from "./Legends";
 import Tooltip from "./Tooltip";
 import type { XScale, YScale } from "./types";
@@ -335,10 +337,62 @@ const Chart: React.FC<ChartProps> = observer(
       });
     };
 
+    // A zoom is a USER gesture: it must survive any re-render that does not
+    // change what is plotted. This reset used to key on the `processedChartItems`
+    // ARRAY IDENTITY, which is a new object on every parent render — `ChartPanel`
+    // builds its `chartItems` with `.filter(...)`, and `.filter` always
+    // allocates. Since `ChartPanel` is a mobx `observer` that reads the timeline
+    // clock (for the selected-date marker), EVERY scrub re-rendered it and so
+    // cleared the zoom. Clicking a bar scrubs the clock, so the user's own click
+    // zoomed the chart back out — and `onXDomainChange?.(undefined)` fired with
+    // it, resetting the published domain, which de-synced any scrubber aligned
+    // to it. Reported 2026-08-10 on al-shaheen; the defect is tenant-agnostic
+    // (any dashboard whose chart panel re-renders for an unrelated reason).
+    //
+    // Key on a stable SIGNATURE of the plotted data plus the plot geometry:
+    //  - series key + point count + x-extent → a genuine data change (series
+    //    added/removed, different span) still resets, which is correct: the old
+    //    zoom window may no longer exist in the new domain.
+    //  - `plotWidth` → a resize invalidates `zoomedXScale`, whose d3 range was
+    //    built against the OLD width; without this the chart would keep drawing
+    //    at the stale range. (The identity-keyed version got this for free.)
+    //
+    // Scope of the guarantee, stated precisely because it is easy to overclaim:
+    // an unchanged key means the zoom is PRESERVED, but "y-values changed" does
+    // NOT imply "no reset". `plotWidth` subtracts `estimatedYAxesWidth`, which
+    // is derived from the y tick labels and therefore from the y VALUES — so a
+    // y-only refresh that widens the tick labels (max 9 → ticks 0,2,4,6,8, one
+    // digit; max 12 → ticks 0,5,10, two digits) shifts `plotWidth` and does
+    // reset. That errs safe (resets more, never less) and is the honest
+    // behaviour to document.
+    //
+    // Also reset d3's own transform: `ZoomX`'s cleanup only detaches listeners
+    // (`selection.on(".zoom", null)`) and deliberately preserves the node's
+    // `__zoom`, so clearing React state alone leaves d3 still holding e.g.
+    // k=4. The chart would redraw un-zoomed and then JUMP straight back to 4×
+    // on the user's next wheel tick, on a dataset it was never zoomed into.
+    // Harmless while this effect fired on every render (state and `__zoom`
+    // were permanently out of step anyway); now that it fires only on a real
+    // data change, that path is reachable, so it is closed here.
+    const chartDataKey = useMemo(
+      () => chartDataSignature(processedChartItems),
+      [processedChartItems]
+    );
+
     useEffect(() => {
       setZoomedXScale(undefined);
       onXDomainChange?.(undefined);
-    }, [processedChartItems, onXDomainChange]);
+      // `__zoom` is exactly what d3-zoom reads back as the current transform
+      // (its `defaultTransform` returns `this.__zoom || identity`), so writing
+      // identity onto the node is the whole reset. Guarded because the surface
+      // is not mounted on the first pass or for an empty chart.
+      const surface = document.getElementById("zoomSurface") as
+        | (Element & { __zoom?: unknown })
+        | null;
+      if (surface && surface.__zoom !== undefined) {
+        surface.__zoom = zoomIdentity;
+      }
+    }, [chartDataKey, plotWidth, onXDomainChange]);
 
     // Publish the plot-area fractions for a plot-aligned scrubber. Done in an
     // effect (not during render) to avoid a mobx write-in-render when the

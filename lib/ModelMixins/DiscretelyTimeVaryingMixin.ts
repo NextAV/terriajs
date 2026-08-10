@@ -205,6 +205,67 @@ function DiscretelyTimeVaryingMixin<
         : this.discreteTimesAsSortedJulianDates![index].time;
     }
 
+    /**
+     * True when `hideOutsideDiscreteTimes` is on AND the current clock instant
+     * is not one of this layer's own discrete times — i.e. the only frame this
+     * layer could show belongs to a DIFFERENT instant.
+     *
+     * Consumers (see `WebMapTileServiceCatalogItem.mapItems`) render nothing
+     * when this is true. The trait is opt-in and defaults false, so every
+     * existing layer keeps the `fromContinuous` nearest/next/previous
+     * behaviour byte-for-byte.
+     *
+     * Implementation notes:
+     * - O(1): it compares the clock against the ALREADY-computed
+     *   `currentDiscreteJulianDate` (itself a binary search) rather than
+     *   scanning the discrete times, so it stays cheap on a layer with a
+     *   large time dimension and during timeline animation.
+     * - SECOND granularity. Two independently-produced instant lists (a
+     *   backend env list and a database column, say) routinely differ in
+     *   sub-second spelling for the same acquisition; comparing exactly would
+     *   hide a layer that genuinely has the frame. One second is far below
+     *   any real revisit interval, so it cannot merge two distinct instants.
+     * - `fromContinuous`-INDEPENDENT. It does NOT compare against
+     *   `currentDiscreteJulianDate` alone: that is the *resolved* time, and
+     *   under `fromContinuous: "next"` a clock 0.4 s past a frame resolves to
+     *   the frame AFTER it, so a layer that genuinely has the frame would be
+     *   hidden (mirror case under `"previous"`). The resolved index and its
+     *   two neighbours are checked instead — a within-tolerance match can only
+     *   ever be adjacent to the resolved index under any of the three modes.
+     * - O(1): three array reads around an index that is itself a binary
+     *   search, so it stays cheap on a large time dimension and during
+     *   timeline animation.
+     * - FAIL-OPEN: no current time, or no discrete times, returns false. A
+     *   layer is never blanked because its time model has not resolved yet.
+     */
+    @computed
+    get isOutsideOwnDiscreteTimes(): boolean {
+      if (this.hideOutsideDiscreteTimes !== true) return false;
+      const current = this.currentTimeAsJulianDate;
+      const times = this.discreteTimesAsSortedJulianDates;
+      const index = this.currentDiscreteTimeIndex;
+      if (
+        current === undefined ||
+        times === undefined ||
+        times.length === 0 ||
+        index === undefined
+      ) {
+        return false;
+      }
+      const currentMs = JulianDate.toDate(current).getTime();
+      for (let i = index - 1; i <= index + 1; i++) {
+        const candidate = times[i];
+        if (candidate === undefined) continue;
+        if (
+          Math.abs(JulianDate.toDate(candidate.time).getTime() - currentMs) <
+          1000
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
+
     @computed({ equals: JulianDate.equals })
     get nextDiscreteJulianDate() {
       const index = this.nextDiscreteTimeIndex;
