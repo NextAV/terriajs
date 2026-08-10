@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
+import { zoomIdentity } from "d3-zoom";
 import { chartDataSignature } from "./chartDataSignature";
 import Legends from "./Legends";
 import Tooltip from "./Tooltip";
@@ -355,8 +356,24 @@ const Chart: React.FC<ChartProps> = observer(
     //  - `plotWidth` → a resize invalidates `zoomedXScale`, whose d3 range was
     //    built against the OLD width; without this the chart would keep drawing
     //    at the stale range. (The identity-keyed version got this for free.)
-    // Values changing under an unchanged extent deliberately does NOT reset —
-    // the zoom window is still valid, so the user keeps their view.
+    //
+    // Scope of the guarantee, stated precisely because it is easy to overclaim:
+    // an unchanged key means the zoom is PRESERVED, but "y-values changed" does
+    // NOT imply "no reset". `plotWidth` subtracts `estimatedYAxesWidth`, which
+    // is derived from the y tick labels and therefore from the y VALUES — so a
+    // y-only refresh that widens the tick labels (max 9 → ticks 0,2,4,6,8, one
+    // digit; max 12 → ticks 0,5,10, two digits) shifts `plotWidth` and does
+    // reset. That errs safe (resets more, never less) and is the honest
+    // behaviour to document.
+    //
+    // Also reset d3's own transform: `ZoomX`'s cleanup only detaches listeners
+    // (`selection.on(".zoom", null)`) and deliberately preserves the node's
+    // `__zoom`, so clearing React state alone leaves d3 still holding e.g.
+    // k=4. The chart would redraw un-zoomed and then JUMP straight back to 4×
+    // on the user's next wheel tick, on a dataset it was never zoomed into.
+    // Harmless while this effect fired on every render (state and `__zoom`
+    // were permanently out of step anyway); now that it fires only on a real
+    // data change, that path is reachable, so it is closed here.
     const chartDataKey = useMemo(
       () => chartDataSignature(processedChartItems),
       [processedChartItems]
@@ -365,6 +382,16 @@ const Chart: React.FC<ChartProps> = observer(
     useEffect(() => {
       setZoomedXScale(undefined);
       onXDomainChange?.(undefined);
+      // `__zoom` is exactly what d3-zoom reads back as the current transform
+      // (its `defaultTransform` returns `this.__zoom || identity`), so writing
+      // identity onto the node is the whole reset. Guarded because the surface
+      // is not mounted on the first pass or for an empty chart.
+      const surface = document.getElementById("zoomSurface") as
+        | (Element & { __zoom?: unknown })
+        | null;
+      if (surface && surface.__zoom !== undefined) {
+        surface.__zoom = zoomIdentity;
+      }
     }, [chartDataKey, plotWidth, onXDomainChange]);
 
     // Publish the plot-area fractions for a plot-aligned scrubber. Done in an

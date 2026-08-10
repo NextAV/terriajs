@@ -414,6 +414,17 @@ class WebMapServiceCatalogItem
       return this._diffImageryParts ? [this._diffImageryParts] : [];
     }
 
+    // Opt-in honesty gate (default off → every existing layer unchanged): when
+    // the clock sits on an instant this layer has no frame for, show NOTHING
+    // rather than the `fromContinuous` neighbour. Mirrors the WMTS gate — the
+    // trait is declared on DiscretelyTimeVaryingTraits, so it must not be a
+    // silent no-op on the other temporal raster type. Deliberately placed
+    // AFTER the diff branch: a diff is an explicit two-date comparison the
+    // user asked for, not a single-instant read of the time model.
+    if (this.isOutsideOwnDiscreteTimes) {
+      return [];
+    }
+
     const result = [];
 
     const current = this._currentImageryParts;

@@ -96,8 +96,30 @@ describe("chartDataSignature", function () {
     expect(chartDataSignature([a, b])).not.toBe(chartDataSignature([b, a]));
   });
 
+  it("changes when the x-scale type flips time <-> linear", function () {
+    // A zoomed `scaleTime` is meaningless over linear data. Reaching this needs
+    // the first selected item to change (ChartView force-hides items whose axis
+    // disagrees), which already changes `key` — asserted so the guarantee does
+    // not depend on that reasoning holding.
+    const linear = item("detections", 35, 1_700_000_000_000, 1_780_000_000_000);
+    (linear as any).xAxis = { scale: "linear" };
+    expect(chartDataSignature([a, b])).not.toBe(
+      chartDataSignature([a, linear])
+    );
+  });
+
+  it("cannot collide when a series name contains a field delimiter", function () {
+    // `ChartItem.key` embeds a backend-controlled `name`, so a member named
+    // "Flow | rate" would inject a delimiter into a naively joined signature.
+    // Encoding as JSON removes the class; a collision here would mean a zoom
+    // that fails to reset when the chart genuinely changed.
+    const joined = [item("Flow | rate", 1, 0, 1)];
+    const split = [item("Flow", 1, 0, 1), item("rate", 1, 0, 1)];
+    expect(chartDataSignature(joined)).not.toBe(chartDataSignature(split));
+  });
+
   it("does not throw on an empty list or a missing domain", function () {
-    expect(chartDataSignature([])).toBe("");
+    expect(chartDataSignature([])).toBe("[]");
     const noDomain = item("x", 1, 0, 1);
     delete (noDomain as any).domain;
     expect(() => chartDataSignature([noDomain])).not.toThrow();

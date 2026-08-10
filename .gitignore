@@ -1,6 +1,10 @@
 # Update .prettierignore whenever this file changes
 docs/
 node_modules/
+# ...and the SYMLINK form: a trailing slash matches a directory only, so a
+# worktree's `node_modules -> /abs/path` symlink was NOT ignored and got
+# committed (caught in review of #48). Both forms are ignored now.
+node_modules
 .idea/
 build/
 error.log

@@ -71,8 +71,55 @@ describe("WebMapTileServiceCatalogItem hideOutsideDiscreteTimes", function () {
       wmts.setTrait(CommonStrata.user, "hideOutsideDiscreteTimes", true);
       wmts.setTrait(CommonStrata.user, "currentTime", PASS_WITH_NO_FRAME);
     });
+    // THIS is the real lock. `mapItems` is deliberately not asserted here —
+    // see the control below for why such an assertion would be vacuous.
     expect(wmts.isOutsideOwnDiscreteTimes).toBe(true);
+  });
+
+  it("CONTROL: mapItems is already empty without a capabilities stratum", function () {
+    // Guards against a false-green that this spec originally shipped with.
+    // `_createImageryProvider` early-returns undefined when the GetCapabilities
+    // stratum or `style` is missing — both are load-supplied — so `mapItems` is
+    // [] here whether or not the gate exists. An `expect(mapItems.length)
+    // .toBe(0)` in the test above therefore passed with the gate DELETED, and
+    // in a repo with no CI that assertion was the only thing standing between
+    // the gate and production.
+    //
+    // This control makes the vacuity explicit and permanent: it asserts the
+    // empty-without-the-gate baseline with the trait OFF, so anyone who later
+    // adds a `mapItems` assertion to the ON case can see immediately that it
+    // proves nothing without a stubbed provider. The behavioural lock lives on
+    // `isOutsideOwnDiscreteTimes`; that `mapItems` consumes it is a one-line
+    // early return verified by reading, and end-to-end in a real browser at
+    // Stage-5.
+    runInAction(() => {
+      wmts.setTrait(CommonStrata.user, "hideOutsideDiscreteTimes", false);
+      wmts.setTrait(CommonStrata.user, "currentTime", FRAME_B);
+    });
+    expect(wmts.isOutsideOwnDiscreteTimes).toBe(false);
     expect(wmts.mapItems.length).toBe(0);
+  });
+
+  it("is fromContinuous-independent: a 0.4s skew under `next` does not hide", function () {
+    // The resolved discrete time is NOT the nearest one under `next`/`previous`.
+    // With frames at A and B and the clock 0.4s past A, `next` resolves to B —
+    // twelve days away — so comparing against the resolved time alone would
+    // hide a layer that genuinely has the frame. The neighbour scan covers it.
+    runInAction(() => {
+      wmts.setTrait(CommonStrata.definition, "fromContinuous", "next");
+      wmts.setTrait(CommonStrata.user, "hideOutsideDiscreteTimes", true);
+      wmts.setTrait(CommonStrata.user, "currentTime", "2026-01-13T14:33:45.4Z");
+    });
+    expect(wmts.isOutsideOwnDiscreteTimes).toBe(false);
+  });
+
+  it("still hides under `next` when there is genuinely no nearby frame", function () {
+    runInAction(() => {
+      wmts.setTrait(CommonStrata.definition, "fromContinuous", "next");
+      wmts.setTrait(CommonStrata.user, "hideOutsideDiscreteTimes", true);
+      wmts.setTrait(CommonStrata.user, "currentTime", PASS_WITH_NO_FRAME);
+    });
+    expect(wmts.isOutsideOwnDiscreteTimes).toBe(true);
   });
 
   it("still renders ON its own frames when the trait is ON", function () {
