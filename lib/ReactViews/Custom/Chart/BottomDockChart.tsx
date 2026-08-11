@@ -475,6 +475,20 @@ const Chart: React.FC<ChartProps> = observer(
       );
     }, [leftFrac, rightFrac, xAxis.scale, onPlotFracChange]);
 
+    // Zoom WINDOW, published post-nice and post-render for the same reason as the active
+    // domain: `.nice()` mutates the scale during `XAxis`'s render, so the value handed to
+    // the d3 event handler is not the one drawn. Keyed on `zoomedXScale` so it fires once
+    // per zoom change; `undefined` at rest is the contract consumers use to mean "not
+    // zoomed", and is preserved — the reset effect still publishes `undefined` directly.
+    useLayoutEffect(() => {
+      if (!onXDomainChange || xAxis.scale !== "time") return;
+      if (zoomedXScale === undefined) return; // rest state: owned by the reset effect
+      const dom = zoomedXScale.domain().map(Number);
+      if (Number.isFinite(dom[0]) && Number.isFinite(dom[1])) {
+        onXDomainChange([dom[0], dom[1]]);
+      }
+    }, [zoomedXScale, xAxis.scale, onXDomainChange]);
+
     // Absolute plot band, in VIEWPORT pixels (getBoundingClientRect). Measured AFTER layout (useLayoutEffect) from the
     // rendered svg, then offset by the same `adjustedMargin.left` / `plotWidth` the plot is
     // actually drawn with — user units map 1:1 to CSS px here (no viewBox), so this is the
@@ -535,10 +549,18 @@ const Chart: React.FC<ChartProps> = observer(
       // render-time values, so they still move whenever the underlying data or zoom
       // changes, which is what should trigger a re-publish. They are deliberately no
       // longer the values published.
+      // `plotWidth` is in the deps for a case none of the others cover: a resize WHILE
+      // ZOOMED changes plotWidth, which rebuilds `initialXScale` — but `xScale` is still
+      // the old `zoomedXScale` object, so its identity does not move and this effect
+      // would not fire. The zoom reset that clears it is a PASSIVE effect, so for one
+      // commit the consumer would hold the new band (published from a layout effect that
+      // does list plotWidth) paired with the old domain — a mismatch in exactly the
+      // pairing a scrubber uses. Listing it here re-publishes in the same commit.
     }, [
       activeDomainStart,
       activeDomainStop,
       xScale,
+      plotWidth,
       xAxis.scale,
       onActiveXDomainChange
     ]);
@@ -587,11 +609,13 @@ const Chart: React.FC<ChartProps> = observer(
         // Wrap setZoomedXScale in a function to ensure React stores the D3 scale function as a value.
         // If passed directly, React treats functions as state updaters, causing zoom to break.
         onZoom={(newXScale) => {
+          // State only. The domain is published from a layout effect below, NOT here:
+          // `newXScale` has not been rendered yet, so `XAxis`'s `scale.nice()` has not
+          // widened it, and publishing from the event hands consumers a domain narrower
+          // than the one every bar and tick is drawn with. Same defect that made the
+          // discrete rail 190px out at the right edge before it was fixed for the ACTIVE
+          // domain; this is its twin on the zoom path.
           setZoomedXScale(() => newXScale);
-          if (onXDomainChange && xAxis.scale === "time") {
-            const dom = newXScale.domain();
-            onXDomainChange([Number(dom[0]), Number(dom[1])]);
-          }
         }}
       >
         <Legends width={plotWidth} chartItems={processedChartItems} />
