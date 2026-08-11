@@ -1,7 +1,33 @@
 import { select as d3Select } from "d3-selection";
-import { zoom as d3Zoom } from "d3-zoom";
-import { useEffect, type ReactNode } from "react";
+import { zoom as d3Zoom, zoomIdentity } from "d3-zoom";
+import { useEffect, type MutableRefObject, type ReactNode } from "react";
 import { XScale } from "./types";
+import { transformForDomain } from "../../../Charts/chartZoomWindow";
+
+/**
+ * Imperative handle for driving the chart's zoom PROGRAMMATICALLY through the
+ * SAME d3 behavior the wheel/drag gestures use. Every method goes through
+ * `selection.call(zoom.…)`, so the "zoom" event fires and the entire publish
+ * pipeline (zoomed scale → post-commit domain publish → any scrubber aligned
+ * to it) sees a programmatic zoom exactly as it sees a gesture. A parallel
+ * zoom state — anything that writes scales without going through the behavior
+ * — is the de-sync class this file's `extent` comment describes; do not add
+ * one.
+ */
+export interface ZoomXApi {
+  /** Multiply the current scale by `factor`, anchored at the extent centre
+   *  (d3's own default). Constrained by scaleExtent/translateExtent. */
+  scaleBy: (factor: number) => void;
+  /** Display exactly `domain` (epoch-ms) across the plot. Passed through
+   *  d3's OWN constrain, so a window wider than the data clamps to the
+   *  initial view rather than under-zooming (k < 1 never renders). */
+  zoomToDomain: (domain: [number, number]) => void;
+  /** Pan (constrained, keeping k) so the world position of `ms` sits at the
+   *  extent centre. No-op at identity, where everything is already visible. */
+  centerOn: (ms: number) => void;
+  /** Return to the identity transform — the full initial view. */
+  resetIdentity: () => void;
+}
 
 interface Props {
   initialScale: XScale;
@@ -26,6 +52,12 @@ interface Props {
    * absent, d3's default extent is used — the pre-existing behaviour.
    */
   extent?: [[number, number], [number, number]];
+  /**
+   * Optional out-param populated with the imperative zoom API while the
+   * behavior is bound (null when unmounted). Lets zoom BUTTONS and a
+   * programmatic default window drive the same behavior as the wheel.
+   */
+  apiRef?: MutableRefObject<ZoomXApi | null>;
   children: ReactNode;
   onZoom: (arg: XScale) => void;
   surface: string;
@@ -36,6 +68,7 @@ export const ZoomX = ({
   scaleExtent,
   translateExtent,
   extent,
+  apiRef,
   initialScale,
   onZoom,
   children
@@ -52,10 +85,54 @@ export const ZoomX = ({
     const selection = d3Select(surface);
     selection.call(zoom as never);
 
+    if (apiRef) {
+      apiRef.current = {
+        scaleBy: (factor) => {
+          if (!Number.isFinite(factor) || factor <= 0) return;
+          // d3's scaleBy routes through its constrain — extent-aware.
+          zoom.scaleBy(selection as never, factor);
+        },
+        zoomToDomain: (domain) => {
+          const p0 = Number(initialScale(domain[0]));
+          const p1 = Number(initialScale(domain[1]));
+          const plotWidth = extent ? extent[1][0] - extent[0][0] : NaN;
+          const t = transformForDomain(p0, p1, plotWidth);
+          if (!t) return;
+          const raw = zoomIdentity.translate(t.x, 0).scale(t.k);
+          // Unlike scaleBy/translateTo, raw zoom.transform does NOT constrain
+          // — apply d3's own constrain so a too-wide window clamps to
+          // identity instead of rendering k < 1 (blank margins beyond data).
+          const constrained = extent
+            ? (zoom.constrain()(raw, extent, translateExtent) as typeof raw)
+            : raw;
+          zoom.transform(selection as never, constrained);
+        },
+        centerOn: (ms) => {
+          const px = Number(initialScale(ms));
+          if (!Number.isFinite(px)) return;
+          // translateTo routes through d3's constrain; world coords are the
+          // UN-zoomed pixel space, which is exactly `initialScale(ms)`.
+          zoom.translateTo(selection as never, px, 0);
+        },
+        resetIdentity: () => {
+          zoom.transform(selection as never, zoomIdentity);
+        }
+      };
+    }
+
     return () => {
       selection.on(".zoom", null);
+      if (apiRef) apiRef.current = null;
     };
-  }, [initialScale, onZoom, scaleExtent, surface, translateExtent, extent]);
+  }, [
+    initialScale,
+    onZoom,
+    scaleExtent,
+    surface,
+    translateExtent,
+    extent,
+    apiRef
+  ]);
 
   // eslint-disable-next-line react/jsx-no-useless-fragment
   return <>{children}</>;

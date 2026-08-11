@@ -10,6 +10,10 @@ import { observer } from "mobx-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { columnForInstant, columnSpanMs } from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
+import {
+  defaultTimeWindow,
+  latestPointMs
+} from "../../../Charts/chartZoomWindow";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
 import { zoomIdentity } from "d3-zoom";
@@ -18,7 +22,7 @@ import Legends from "./Legends";
 import Tooltip from "./Tooltip";
 import type { XScale, YScale } from "./types";
 import { Cursor, Plot, PointsOnMap, XAxis, YAxis } from "./utils";
-import { ZoomX } from "./ZoomX";
+import { ZoomX, type ZoomXApi } from "./ZoomX";
 
 const CHART_MIN_WIDTH = 110;
 const DEFAULT_GRID_COLOR = "#efefef";
@@ -77,6 +81,18 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
    * marker, byte-identical to before.
    */
   selectedTimeMs?: number;
+  /**
+   * Optional: open the chart on the last N days OF THE DATA (anchored at the
+   * latest observation, never the wall clock) instead of the full extent —
+   * applied as an initial zoom TRANSFORM through the same d3 behavior as the
+   * wheel, so identity remains the full archive: zooming out reaches all
+   * history, and the reset control returns to this window. `undefined`
+   * (every caller that doesn't pass it) → full extent, byte-identical to
+   * before. The VALUE is deliberately a prop, not a constant: "last 90 days"
+   * is right for a monitoring feed and wrong for a 5-year trend chart, so the
+   * capability lives here and each tenant supplies its own number.
+   */
+  defaultTimeWindowDays?: number;
 }
 
 const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
@@ -91,7 +107,8 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
     onPlotFracChange,
     onPlotBandChange,
     onActiveXDomainChange,
-    selectedTimeMs
+    selectedTimeMs,
+    defaultTimeWindowDays
   }) => {
     return (
       <Chart
@@ -105,6 +122,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         onPlotBandChange={onPlotBandChange}
         onActiveXDomainChange={onActiveXDomainChange}
         selectedTimeMs={selectedTimeMs}
+        defaultTimeWindowDays={defaultTimeWindowDays}
       />
     );
   }
@@ -161,6 +179,8 @@ interface ChartProps {
   onActiveXDomainChange?: (domain: [number, number] | undefined) => void;
   /** Epoch-ms of the selected timeline time → a permanent vertical marker. */
   selectedTimeMs?: number;
+  /** Last-N-days-of-data initial window; see `BottomDockChartProps`. */
+  defaultTimeWindowDays?: number;
 }
 
 const Chart: React.FC<ChartProps> = observer(
@@ -174,7 +194,8 @@ const Chart: React.FC<ChartProps> = observer(
     onPlotFracChange,
     onPlotBandChange,
     onActiveXDomainChange,
-    selectedTimeMs
+    selectedTimeMs,
+    defaultTimeWindowDays
   }) => {
     const [zoomedXScale, setZoomedXScale] = useState<XScale | undefined>(
       undefined
@@ -187,6 +208,11 @@ const Chart: React.FC<ChartProps> = observer(
     // margins and plotWidth were computed against; measuring it here and publishing an
     // absolute band is what saves every consumer from having to reconcile the two.
     const rootSvgRef = useRef<SVGSVGElement | null>(null);
+    // Imperative handle onto the ONE d3 zoom behavior (populated by ZoomX).
+    // The zoom buttons, the default window and follow-the-clock all drive the
+    // behavior through this — never a parallel scale write (the de-sync
+    // class #48/#59 closed).
+    const zoomApiRef = useRef<ZoomXApi | null>(null);
 
     const processedChartItems: ChartItem[] = useMemo(() => {
       return sortChartItemsByType(propsChartItems)
@@ -252,8 +278,23 @@ const Chart: React.FC<ChartProps> = observer(
         domain: calculateDomainX(processedChartItems),
         range: [0, plotWidth]
       };
-      if (xAxis.scale === "linear") return scaleLinear(params);
-      else return scaleTime(params);
+      const scale =
+        xAxis.scale === "linear" ? scaleLinear(params) : scaleTime(params);
+      // Nice the domain ONCE, here, at construction. `XAxis` renders
+      // `scale.nice()` and d3's .nice() MUTATES IN PLACE — so before this
+      // line, anything computed in THIS component's render body on the FIRST
+      // render (the selected-date marker's x, most visibly) used the PRE-nice
+      // domain while every bar, tick and gridline drawn by the children used
+      // the POST-nice one. Nothing re-rendered at boot (the timeline clock
+      // pins before the chart's first paint), so the marker sat ~190px right
+      // of its bar until a hover forced a re-render — the THIRD instance of
+      // this mutation class, after the active-domain publish (#57) and the
+      // zoom publish (#59). Nicing at construction makes the first paint
+      // identical to every later paint; XAxis's render-nice becomes an
+      // idempotent no-op on this scale (nicing an already-nice domain leaves
+      // it unchanged) and still serves the zoomed scale exactly as before.
+      scale.nice();
+      return scale;
     }, [xAxis, processedChartItems, plotWidth]);
 
     const xScale = zoomedXScale || initialXScale;
@@ -463,6 +504,53 @@ const Chart: React.FC<ChartProps> = observer(
       }
     }, [chartDataKey, plotWidth, onXDomainChange]);
 
+    // The configured default window, or undefined when the caller passed no
+    // window / the data has no finite x — "no window" simply means the chart
+    // opens on its full extent, exactly as before this prop existed.
+    const defaultWindow = useMemo(
+      () =>
+        xAxis.scale === "time"
+          ? defaultTimeWindow(
+              latestPointMs(processedChartItems),
+              defaultTimeWindowDays
+            )
+          : undefined,
+      [xAxis.scale, processedChartItems, defaultTimeWindowDays]
+    );
+
+    // Apply the default window AFTER the reset effect above (declaration
+    // order is execution order): on mount, on a genuine data change, and on a
+    // resize, the sequence is reset-to-identity → apply-the-window, so the
+    // window is always computed against the CURRENT data and plot geometry.
+    // Routed through the d3 behavior (zoomToDomain fires the "zoom" event),
+    // so the zoomed scale, the post-commit domain publish and any scrubber
+    // aligned to it all see it exactly like a wheel gesture.
+    useEffect(() => {
+      if (!defaultWindow) return;
+      zoomApiRef.current?.zoomToDomain(defaultWindow);
+      // `chartDataKey` + `plotWidth` mirror the reset effect's deps on
+      // purpose: fire when (and only when) the reset just ran.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chartDataKey, plotWidth, defaultWindow]);
+
+    // Follow the timeline clock while windowed/zoomed: when the selected
+    // instant moves OUTSIDE the visible window (a ◀/▶ step, a bar click far
+    // away, an external scrub), pan — constrained, same k — to keep it in
+    // view. Without this, a windowed chart's marker and rail tick silently
+    // vanish off-window on the first step past the edge. At identity
+    // (zoomedXScale undefined) everything is already visible: no-op. No
+    // feedback loop: the pan changes zoomedXScale, the re-run then finds the
+    // instant IN view and does nothing.
+    useEffect(() => {
+      if (selectedTimeMs == null || !Number.isFinite(selectedTimeMs)) return;
+      if (xAxis.scale !== "time") return;
+      if (zoomedXScale === undefined) return;
+      const [d0, d1] = zoomedXScale.domain().map(Number);
+      if (!Number.isFinite(d0) || !Number.isFinite(d1)) return;
+      if (selectedTimeMs >= d0 && selectedTimeMs <= d1) return;
+      zoomApiRef.current?.centerOn(selectedTimeMs);
+    }, [selectedTimeMs, zoomedXScale, xAxis.scale]);
+
     // Publish the plot-area fractions for a plot-aligned scrubber. Done in an
     // effect (not during render) to avoid a mobx write-in-render when the
     // callback sets a Terria observable. Only a TIME-axis chart publishes a
@@ -606,6 +694,7 @@ const Chart: React.FC<ChartProps> = observer(
                 [Infinity, Infinity]
               ]
         }
+        apiRef={zoomApiRef}
         // Wrap setZoomedXScale in a function to ensure React stores the D3 scale function as a value.
         // If passed directly, React treats functions as state updaters, causing zoom to break.
         onZoom={(newXScale) => {
@@ -686,6 +775,19 @@ const Chart: React.FC<ChartProps> = observer(
           </svg>
           <Tooltip {...tooltip} />
           <PointsOnMap chartItems={processedChartItems} />
+          {zoomBounded && (
+            <ChartZoomControls
+              left={adjustedMargin.left + plotWidth - 26}
+              top={adjustedMargin.top + 4}
+              onZoomIn={() => zoomApiRef.current?.scaleBy(1.6)}
+              onZoomOut={() => zoomApiRef.current?.scaleBy(1 / 1.6)}
+              onReset={() => {
+                if (defaultWindow)
+                  zoomApiRef.current?.zoomToDomain(defaultWindow);
+                else zoomApiRef.current?.resetIdentity();
+              }}
+            />
+          )}
         </div>
       </ZoomX>
     );
@@ -693,6 +795,79 @@ const Chart: React.FC<ChartProps> = observer(
 );
 
 Chart.displayName = "Chart";
+
+/**
+ * Vertical ＋/－/reset stack overlaying the plot's top-right corner — the map
+ * zoom-control convention, applied to the chart. Every action drives the ONE
+ * d3 zoom behavior (via the ZoomX api), so a button zoom is indistinguishable
+ * from a wheel gesture to every consumer downstream (zoomed scale, published
+ * domains, any scrubber aligned to them). Positioned in the chart's own
+ * prop-coordinate px (like everything drawn in the svg), so it stays glued to
+ * the plot band regardless of how the root svg's CSS width relates to the
+ * `width` prop. Unconditional: the wheel-zoom it makes discoverable exists on
+ * every tenant's chart.
+ */
+const ChartZoomControls: React.FC<{
+  left: number;
+  top: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onReset: () => void;
+}> = ({ left, top, onZoomIn, onZoomOut, onReset }) => {
+  const button: React.CSSProperties = {
+    width: 22,
+    height: 22,
+    padding: 0,
+    border: "1px solid rgba(255,255,255,0.25)",
+    borderRadius: 3,
+    background: "rgba(0,0,0,0.45)",
+    color: "#ffffff",
+    font: "14px/1 Arial, sans-serif",
+    cursor: "pointer",
+    display: "block"
+  };
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        zIndex: 2
+      }}
+    >
+      <button
+        type="button"
+        style={button}
+        title="Zoom in"
+        aria-label="Zoom in on the chart's time axis"
+        onClick={onZoomIn}
+      >
+        +
+      </button>
+      <button
+        type="button"
+        style={button}
+        title="Zoom out"
+        aria-label="Zoom out on the chart's time axis"
+        onClick={onZoomOut}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        style={{ ...button, fontSize: 12 }}
+        title="Reset view"
+        aria-label="Reset the chart's time axis to its default view"
+        onClick={onReset}
+      >
+        ⟲
+      </button>
+    </div>
+  );
+};
 
 // Type guard to filter ChartItems that don't produce a nearestPoint
 const pointNotUndefined = (itemPoint: {
