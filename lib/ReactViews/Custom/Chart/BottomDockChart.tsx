@@ -7,17 +7,8 @@ import { scaleLinear, scaleTime } from "@visx/scale";
 import groupBy from "lodash-es/groupBy";
 import minBy from "lodash-es/minBy";
 import { observer } from "mobx-react";
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState
-} from "react";
-import {
-  columnForInstant,
-  columnSpanMs
-} from "../../../Charts/barColumnSnap";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { columnForInstant, columnSpanMs } from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
@@ -51,7 +42,7 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
   onXDomainChange?: (domain: [number, number] | undefined) => void;
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
   /**
-   * Plot area in ABSOLUTE page pixels, `[left, right]`.
+   * Plot area in ABSOLUTE VIEWPORT pixels, `[left, right]`.
    *
    * Supersedes `onPlotFracChange` for any consumer mapping a date to a screen position.
    * Those fractions are fractions of the `width` PROP, but this component renders its root
@@ -148,7 +139,7 @@ interface ChartProps {
    */
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
   /**
-   * Plot area in ABSOLUTE page pixels, `[left, right]`.
+   * Plot area in ABSOLUTE VIEWPORT pixels, `[left, right]`.
    *
    * Supersedes `onPlotFracChange` for any consumer mapping a date to a screen position.
    * Those fractions are fractions of the `width` PROP, but this component renders its root
@@ -343,11 +334,11 @@ const Chart: React.FC<ChartProps> = observer(
     }, [processedChartItems]);
     const markerTimeMs =
       selectedTimeMs != null && Number.isFinite(selectedTimeMs)
-        ? columnForInstant(
+        ? (columnForInstant(
             selectedTimeMs,
             barColumns.starts,
             barColumns.spanMs
-          ) ?? selectedTimeMs
+          ) ?? selectedTimeMs)
         : selectedTimeMs;
     const selectedX =
       markerTimeMs != null &&
@@ -484,7 +475,7 @@ const Chart: React.FC<ChartProps> = observer(
       );
     }, [leftFrac, rightFrac, xAxis.scale, onPlotFracChange]);
 
-    // Absolute plot band, in page pixels. Measured AFTER layout (useLayoutEffect) from the
+    // Absolute plot band, in VIEWPORT pixels (getBoundingClientRect). Measured AFTER layout (useLayoutEffect) from the
     // rendered svg, then offset by the same `adjustedMargin.left` / `plotWidth` the plot is
     // actually drawn with — user units map 1:1 to CSS px here (no viewBox), so this is the
     // exact band, not an estimate. Recomputed whenever anything that can move it changes,
@@ -503,13 +494,7 @@ const Chart: React.FC<ChartProps> = observer(
       publish();
       window.addEventListener("resize", publish);
       return () => window.removeEventListener("resize", publish);
-    }, [
-      onPlotBandChange,
-      adjustedMargin.left,
-      plotWidth,
-      height,
-      xAxis.scale
-    ]);
+    }, [onPlotBandChange, adjustedMargin.left, plotWidth, height, xAxis.scale]);
 
     // Publish the ACTIVE x-domain (zoomed if zoomed, else the padded initial
     // domain) for date→pixel consumers — the missing half of onXDomainChange,

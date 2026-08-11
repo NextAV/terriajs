@@ -160,7 +160,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           height={CHART_PANEL_HEIGHT - CHART_LEGEND_HEIGHT}
           onXDomainChange={setChartXDomain}
           onPlotFracChange={setChartPlotFrac}
-            onPlotBandChange={setChartPlotBand}
+          onPlotBandChange={setChartPlotBand}
           onActiveXDomainChange={setChartActiveXDomain}
           selectedTimeMs={selectedTimeMs}
         />
@@ -179,6 +179,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       viewState.terria,
       setChartXDomain,
       setChartPlotFrac,
+      setChartPlotBand,
       setChartActiveXDomain,
       selectedTimeMs
     ]);

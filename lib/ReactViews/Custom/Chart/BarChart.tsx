@@ -77,14 +77,7 @@ function computeBarWidth(
  */
 const _BarChart = forwardRef<ChartZoomHandle, Props>(
   (
-    {
-      id,
-      chartItem,
-      scales,
-      color,
-      rendersHitLayer = true,
-      bandPoints
-    },
+    { id, chartItem, scales, color, rendersHitLayer = true, bandPoints },
     ref
   ) => {
     const points = chartItem.points;
@@ -143,14 +136,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       // filtered through scales.x — the handle must rebuild if the scale changes so
       // the rect node order stays aligned with `bars`; and `chartItem` because
       // doZoom now branches on `chartItem.onClick` (whether hit rects exist).
-      [
-        id,
-        bars,
-        scales,
-        chartItem,
-        rendersHitLayer,
-        bandPoints
-      ]
+      [id, bars, scales, chartItem, rendersHitLayer, bandPoints]
     );
 
     const fill = color || chartItem.getColor();

@@ -29,38 +29,56 @@ interface PlotProps {
 
 export const Plot = memo(
   ({ chartItems, initialScales, zoomedScales }: PlotProps) => {
-    const chartRefs = useRef<{ id: string; zoomHandle: ChartZoomHandle }[]>([]);
+    const chartRefs = useRef<
+      { id: string; zoomHandle: ChartZoomHandle; itemIndex: number }[]
+    >([]);
 
-    // Bar series are centred on their x, so several on one axis land on the SAME pixels.
-    // Two things follow, and both are inert for a single bar series — every chart that
-    // exists today bar one.
+    // Bar series are centred on their x, so several on one axis land on the SAME pixels
+    // and, at equal widths, the one painted LAST is the only one you see. All of the below
+    // is inert for a single bar series — every chart that exists today bar one.
     //
-    // WIDTH: every bar series measures its width from ONE shared set of points, so all
-    // series on a chart render at an IDENTICAL width. Measuring per-series makes the
-    // width a function of which series happens to hold the tightest pair — a sparse
-    // series then draws visibly wider bars than a dense one on the same axis, which
-    // reads as a rendering fault rather than as data. Equal widths mean the series
-    // painted last is the one you see, so the composer declares the CONTEXT series
-    // first and the PRODUCT last; that is sound only because the product's dates are a
-    // subset of the context's, so a covered context bar tells the reader nothing the
-    // product bar has not already told them.
+    // ORDER IS DERIVED FROM THE DATA, deliberately, because array order here is NOT stable:
+    // it is `terria.workbench.items` order, and `Workbench.add()` inserts at index 0, so
+    // toggling a layer off and on (or a workbench drag) reorders the bar series. Under an
+    // inset that degraded gracefully — whichever ended up in front was narrower, so both
+    // stayed visible. At equal widths it does not: one toggle could hide the product series
+    // entirely, which is the exact defect this whole change set exists to fix.
     //
-    // CLICKS: the hit layer goes to the BACKMOST bar series, never to "the one with the
-    // most points". A full-height hit rect is a PAINTED element (`fill="transparent"`
-    // still satisfies `pointer-events: visiblePainted`), so whichever series draws it
-    // last owns every click on the plot: the series behind it become unclickable and
-    // clicks resolve to the wrong series' nearest point. Drawn by the backmost series
-    // it can cover nothing. So the composer's first-declared series is both the
-    // backdrop and the click surface, and should be the one with the finest x tiling.
+    // So the series with the MOST points is treated as the backdrop: it paints FIRST (so the
+    // sparser series is never covered) and it draws the click targets (its x tiling is the
+    // finest, so a click resolves to the date actually under the cursor). A coverage/context
+    // series is a superset of the product it contextualises by construction, which is what
+    // makes point count the right proxy — and unlike declaration order, nothing in the UI
+    // can flip it.
+    //
+    // The hit layer MUST go to the backmost series: a full-height hit rect is a PAINTED
+    // element (`fill="transparent"` still satisfies `pointer-events: visiblePainted`), so
+    // one drawn in front owns every click on the plot.
     const barPositions = useMemo(() => {
       const indices = chartItems
         .map((c, i) => (c.type === "bar" ? i : -1))
         .filter((i) => i >= 0);
+      // Most points first. `sort` is stable (ES2019+), so equal counts keep array order.
+      const byDensity = [...indices].sort(
+        (a, b) => chartItems[b].points.length - chartItems[a].points.length
+      );
+      // slot -> chart-item index: the k-th bar POSITION in the output renders the k-th
+      // densest series, so the DOM order (= paint order) is density-ordered regardless of
+      // how the workbench happens to be sorted.
+      const slotFor = new Map<number, number>();
+      indices.forEach((slot, k) => slotFor.set(slot, byDensity[k]));
       // y-filtered to match what BarChart actually DRAWS. A point with a finite x but a
       // non-finite y is never rendered as a bar, yet left in the band source it tightens
       // the band for every series on the chart (measured 7.00px -> 2.10px, 70% thinner)
       // — a bar that does not exist making every bar that does exist thinner. The x
       // filter stays in BarChart, where the scale is.
+      //
+      // NOTE the band is the MINIMUM gap over the UNION, so adding a series can only ever
+      // shrink it, and a single near-but-not-equal pair collapses it for every bar on the
+      // chart: measured at 229 daily bars, an exact-subset series keeps 2.75px while the
+      // same series offset by 1ms drops every bar to the 1px floor. Both series here are
+      // daily and midnight-keyed, so this is latent — but it is why the two must stay on
+      // the same time grid, not merely overlap.
       const bandPoints =
         indices.length > 1
           ? indices.flatMap((i) =>
@@ -69,22 +87,31 @@ export const Plot = memo(
           : undefined;
       return {
         count: indices.length,
-        hitLayerIndex: indices.length > 0 ? indices[0] : -1,
+        slotFor,
+        hitLayerIndex: byDensity.length > 0 ? byDensity[0] : -1,
         bandPoints
       };
     }, [chartItems]);
 
     useEffect(() => {
-      chartRefs.current?.forEach((ref, i) => {
+      chartRefs.current?.forEach((ref) => {
         if (typeof ref?.zoomHandle.doZoom === "function") {
-          ref.zoomHandle.doZoom(zoomedScales[i]);
+          // Indexed by the ref's OWN chart-item index, never by its position in this
+          // push-ordered array. Those coincided only while render order matched
+          // `chartItems` order; bar series now render density-ordered, so a positional
+          // read would hand a series another series' scale.
+          ref.zoomHandle.doZoom(zoomedScales[ref.itemIndex]);
         }
       });
     }, [zoomedScales]);
 
-    const addToRefs = (id: string, el: ChartZoomHandle | null) => {
+    const addToRefs = (
+      id: string,
+      el: ChartZoomHandle | null,
+      itemIndex: number
+    ) => {
       if (el) {
-        chartRefs.current.push({ id, zoomHandle: el });
+        chartRefs.current.push({ id, zoomHandle: el, itemIndex });
       } else {
         chartRefs.current = chartRefs.current.filter((ref) => ref.id !== id);
       }
@@ -99,26 +126,35 @@ export const Plot = memo(
               return (
                 <LineChart
                   key={chartItem.key}
-                  ref={(node) => addToRefs(id, node)}
+                  ref={(node) => addToRefs(id, node, i)}
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
                 />
               );
-            case "bar":
+            case "bar": {
+              // This POSITION renders whichever bar series the density order assigns to
+              // it, so DOM order (= paint order) is density-ordered no matter how the
+              // workbench is sorted. `key`/`id`/scales all follow the assigned item, so a
+              // series keeps its identity and its own scale wherever it is drawn.
+              const barIndex = barPositions.slotFor.get(i) ?? i;
+              const barItem = chartItems[barIndex];
+              const barId = sanitizeIdString(barItem.key);
               return (
                 <BarChart
-                  key={chartItem.key}
-                  ref={(node) => addToRefs(id, node)}
-                  id={id}
-                  chartItem={chartItem}
-                  scales={initialScales[i]}
+                  key={barItem.key}
+                  ref={(node) => addToRefs(barId, node, barIndex)}
+                  id={barId}
+                  chartItem={barItem}
+                  scales={initialScales[barIndex]}
                   rendersHitLayer={
-                    barPositions.count < 2 || barPositions.hitLayerIndex === i
+                    barPositions.count < 2 ||
+                    barPositions.hitLayerIndex === barIndex
                   }
                   bandPoints={barPositions.bandPoints}
                 />
               );
+            }
             case "momentPoints": {
               // Find a basis item to stick the points on, if we can't find one, we
               // vertically center the points
@@ -131,7 +167,7 @@ export const Plot = memo(
               return (
                 <MomentPointsChart
                   key={chartItem.key}
-                  ref={(node) => addToRefs(id, node)}
+                  ref={(node) => addToRefs(id, node, i)}
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
@@ -145,7 +181,7 @@ export const Plot = memo(
               return (
                 <MomentLinesChart
                   key={chartItem.key}
-                  ref={(node) => addToRefs(id, node)}
+                  ref={(node) => addToRefs(id, node, i)}
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
@@ -156,7 +192,7 @@ export const Plot = memo(
               return (
                 <LineAndPointChart
                   key={chartItem.key}
-                  ref={(node) => addToRefs(id, node)}
+                  ref={(node) => addToRefs(id, node, i)}
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
