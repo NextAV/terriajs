@@ -2,7 +2,10 @@ import { select as d3Select } from "d3-selection";
 import { zoom as d3Zoom, zoomIdentity } from "d3-zoom";
 import { useEffect, type MutableRefObject, type ReactNode } from "react";
 import { XScale } from "./types";
-import { transformForDomain } from "../../../Charts/chartZoomWindow";
+import {
+  panTargetIsReachable,
+  zoomActionForDomain
+} from "../../../Charts/chartZoomWindow";
 
 /**
  * Imperative handle for driving the chart's zoom PROGRAMMATICALLY through the
@@ -96,12 +99,20 @@ export const ZoomX = ({
           const p0 = Number(initialScale(domain[0]));
           const p1 = Number(initialScale(domain[1]));
           const plotWidth = extent ? extent[1][0] - extent[0][0] : NaN;
-          const t = transformForDomain(p0, p1, plotWidth);
-          if (!t) return;
-          const raw = zoomIdentity.translate(t.x, 0).scale(t.k);
-          // Unlike scaleBy/translateTo, raw zoom.transform does NOT constrain
-          // — apply d3's own constrain so a too-wide window clamps to
-          // identity instead of rendering k < 1 (blank margins beyond data).
+          // The DECISION (noop / identity / transform) is pure and unit-tested
+          // in `chartZoomWindow`; only the d3 calls live here. In particular
+          // the k clamp must be explicit: `zoom.transform` applies k verbatim
+          // (d3 clamps k only in scaleTo/scaleBy/wheeled), so a window wider
+          // than the data would otherwise render at k < 1 with blank margins.
+          const action = zoomActionForDomain(p0, p1, plotWidth, scaleExtent[0]);
+          if (action.kind === "noop") return;
+          if (action.kind === "identity") {
+            zoom.transform(selection as never, zoomIdentity);
+            return;
+          }
+          const raw = zoomIdentity.translate(action.x, 0).scale(action.k);
+          // `zoom.transform` applies verbatim, so run d3's own constrain for
+          // the TRANSLATE half (keeps the window inside translateExtent).
           const constrained = extent
             ? (zoom.constrain()(raw, extent, translateExtent) as typeof raw)
             : raw;
@@ -110,8 +121,22 @@ export const ZoomX = ({
         centerOn: (ms) => {
           const px = Number(initialScale(ms));
           if (!Number.isFinite(px)) return;
-          // translateTo routes through d3's constrain; world coords are the
-          // UN-zoomed pixel space, which is exactly `initialScale(ms)`.
+          // REFUSE an unreachable target. `translateTo` is constrained by
+          // `translateExtent`, so a world x outside the plot box cannot be
+          // panned to — but d3 emits "zoom" UNCONDITIONALLY (zoom.js
+          // gesture.zoom -> emit), and this component's handler builds a NEW
+          // scale object per emit, so a caller that re-runs on scale identity
+          // would spin forever on a target it can never reach. That is not
+          // hypothetical here: a timeline driver may carry more instants than
+          // the chart has bars (al-shaheen's 233-pass union vs its
+          // credible-detection bars), so an instant outside the chart's own
+          // domain is reachable by one ◀ step.
+          const [lo, hi] = extent
+            ? [extent[0][0], extent[1][0]]
+            : [-Infinity, Infinity];
+          if (!panTargetIsReachable(px, lo, hi)) return;
+          // World coords are the UN-zoomed pixel space, which is exactly
+          // `initialScale(ms)`; y is irrelevant for an x-only zoom.
           zoom.translateTo(selection as never, px, 0);
         },
         resetIdentity: () => {

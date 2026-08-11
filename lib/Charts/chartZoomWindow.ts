@@ -61,10 +61,14 @@ export function defaultTimeWindow(
  * pixels, unmeasured plot) rather than handing d3 an Infinity — the caller
  * then simply does not zoom, which is the safe no-op.
  *
- * NOTE k may be < 1 (a requested window WIDER than the data domain). The
- * caller passes the result through d3's own constrain with scaleExtent
- * [1, ∞), which clamps it back to identity — deliberately not re-implemented
- * here, so there is exactly one constraint implementation.
+ * k MAY BE < 1 — a requested window WIDER than the data domain. The caller
+ * MUST clamp that itself. An earlier version of this note said d3's own
+ * `constrain` would clamp it back to identity via `scaleExtent`; that is
+ * FALSE and was verified false against real d3: `defaultConstrain` only
+ * TRANSLATES, and the k clamp lives in scaleTo/scaleBy/wheeled — paths
+ * `zoom.transform` never takes. A 90-day window on a 30-day archive measured
+ * k = 0.3333 both before and after `constrain`, rendering the chart
+ * under-zoomed with blank margins past the last observation.
  */
 export function transformForDomain(
   p0: number,
@@ -77,4 +81,55 @@ export function transformForDomain(
   if (!(span > 0)) return undefined;
   const k = plotWidth / span;
   return { k, x: -k * p0 };
+}
+
+/**
+ * What `zoomToDomain` should DO for a requested window — the decision, split
+ * out from the d3 calls so it is testable.
+ *
+ * This exists because the first version of this change put the clamp inline
+ * in the component and asserted (wrongly) that d3's `constrain` handled it.
+ * The pure-math tests could not reach that claim, so nothing caught it; a
+ * review did, by executing real d3. Decisions belong here; only the d3 calls
+ * belong in the component.
+ *
+ *  - `noop`     — degenerate request; do not touch the transform.
+ *  - `identity` — the window is at least as wide as the data, so showing it
+ *                 means showing everything. Must NOT be expressed as k < 1:
+ *                 `zoom.transform` applies k verbatim (d3 clamps k only in
+ *                 scaleTo/scaleBy/wheeled), so k < 1 renders the chart
+ *                 under-zoomed with blank margins past the last observation.
+ *  - `transform`— a genuine zoom-in.
+ */
+export function zoomActionForDomain(
+  p0: number,
+  p1: number,
+  plotWidth: number,
+  minScale: number
+): { kind: "noop" } | { kind: "identity" } | { kind: "transform"; k: number; x: number } {
+  const t = transformForDomain(p0, p1, plotWidth);
+  if (!t) return { kind: "noop" };
+  if (!Number.isFinite(minScale)) return { kind: "transform", k: t.k, x: t.x };
+  if (t.k <= minScale) return { kind: "identity" };
+  return { kind: "transform", k: t.k, x: t.x };
+}
+
+/**
+ * Whether a pan target is REACHABLE, i.e. inside the pannable box.
+ *
+ * d3's `translateTo` is constrained by `translateExtent`, so an out-of-box
+ * target silently cannot be reached — but d3 emits its "zoom" event
+ * unconditionally, and a consumer that rebuilds a scale object per emit will
+ * therefore see a fresh identity forever and re-run indefinitely. A caller
+ * that pans in response to a scale change MUST check this first.
+ *
+ * Non-finite `px` is unreachable (never pan to NaN).
+ */
+export function panTargetIsReachable(
+  px: number,
+  lo: number,
+  hi: number
+): boolean {
+  if (!Number.isFinite(px)) return false;
+  return px >= lo && px <= hi;
 }

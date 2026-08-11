@@ -525,13 +525,28 @@ const Chart: React.FC<ChartProps> = observer(
     // Routed through the d3 behavior (zoomToDomain fires the "zoom" event),
     // so the zoomed scale, the post-commit domain publish and any scrubber
     // aligned to it all see it exactly like a wheel gesture.
+    //
+    // Keyed on a PRIMITIVE signature of the window, never the array identity.
+    // `defaultWindow` is derived from `processedChartItems`, which is a fresh
+    // allocation on every parent render (`ChartPanel` builds its items with
+    // `.filter(...)`, and it is a mobx observer that reads the timeline
+    // clock), so an identity-keyed effect would re-apply the window on EVERY
+    // render — and since clicking a bar scrubs the clock, the user's own
+    // click would snap the chart back to 90 days, making the zoom-out control
+    // this PR ships unusable. That is the same defect class the chart's reset
+    // effect already had to close (terriajs#48); it came back through a new
+    // door, and an `exhaustive-deps` suppression was hiding it.
+    const defaultWindowKey = defaultWindow
+      ? `${defaultWindow[0]}:${defaultWindow[1]}`
+      : "";
     useEffect(() => {
-      if (!defaultWindow) return;
-      zoomApiRef.current?.zoomToDomain(defaultWindow);
-      // `chartDataKey` + `plotWidth` mirror the reset effect's deps on
-      // purpose: fire when (and only when) the reset just ran.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [chartDataKey, plotWidth, defaultWindow]);
+      if (!defaultWindowKey) return;
+      const [start, stop] = defaultWindowKey.split(":").map(Number);
+      zoomApiRef.current?.zoomToDomain([start, stop]);
+      // `chartDataKey` + `plotWidth` mirror the reset effect's deps so this
+      // fires right after a reset; `defaultWindowKey` is a string, so an
+      // unchanged window across re-renders is a stable dep.
+    }, [chartDataKey, plotWidth, defaultWindowKey]);
 
     // Follow the timeline clock while windowed/zoomed: when the selected
     // instant moves OUTSIDE the visible window (a ◀/▶ step, a bar click far
@@ -698,6 +713,20 @@ const Chart: React.FC<ChartProps> = observer(
         // Wrap setZoomedXScale in a function to ensure React stores the D3 scale function as a value.
         // If passed directly, React treats functions as state updaters, causing zoom to break.
         onZoom={(newXScale) => {
+          // Nice the zoomed scale HERE, where it is created — the second half
+          // of the nice-at-construction fix. `transform.rescaleX()` derives a
+          // scale from the initial one but does NOT nice it, and `XAxis`
+          // renders `scale.nice()`, which MUTATES IN PLACE. So without this,
+          // render N computes the marker's x from the pre-nice zoomed domain
+          // while the bars and ticks that render after it use the post-nice
+          // one — the identical defect this PR fixes for `initialXScale`,
+          // re-opened on the path a WINDOWED tenant actually takes. Measured
+          // against real d3 on the al-shaheen window: 90.00d -> 91.00d, a
+          // 9.3px marker drift, healed only by an unrelated re-render (i.e. a
+          // hover), which is exactly the reported symptom at smaller
+          // magnitude. Nicing at creation makes XAxis's own nice idempotent
+          // and preserves today's rendered domain exactly.
+          newXScale.nice();
           // State only. The domain is published from a layout effect below, NOT here:
           // `newXScale` has not been rendered yet, so `XAxis`'s `scale.nice()` has not
           // widened it, and publishing from the event hands consumers a domain narrower
@@ -777,8 +806,13 @@ const Chart: React.FC<ChartProps> = observer(
           <PointsOnMap chartItems={processedChartItems} />
           {zoomBounded && (
             <ChartZoomControls
-              left={adjustedMargin.left + plotWidth - 26}
+              /* In the RIGHT MARGIN, not over the plot: overlaying the
+               * top-right corner would occlude the newest bars — the most
+               * recent passes, which is what a monitoring feed is read for —
+               * and would swallow wheel events aimed at the zoom surface. */
+              left={adjustedMargin.left + plotWidth + 4}
               top={adjustedMargin.top + 4}
+              hasDefaultWindow={!!defaultWindow}
               onZoomIn={() => zoomApiRef.current?.scaleBy(1.6)}
               onZoomOut={() => zoomApiRef.current?.scaleBy(1 / 1.6)}
               onReset={() => {
@@ -810,10 +844,11 @@ Chart.displayName = "Chart";
 const ChartZoomControls: React.FC<{
   left: number;
   top: number;
+  hasDefaultWindow: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
-}> = ({ left, top, onZoomIn, onZoomOut, onReset }) => {
+}> = ({ left, top, hasDefaultWindow, onZoomIn, onZoomOut, onReset }) => {
   const button: React.CSSProperties = {
     width: 22,
     height: 22,
@@ -859,8 +894,15 @@ const ChartZoomControls: React.FC<{
       <button
         type="button"
         style={{ ...button, fontSize: 12 }}
-        title="Reset view"
-        aria-label="Reset the chart's time axis to its default view"
+        /* Name what it actually does. `⟲` conventionally reads as "fit all",
+         * but with a default window configured this zooms IN to that window
+         * from a fully zoomed-out view — surprising unless the label says so. */
+        title={hasDefaultWindow ? "Reset to the default time window" : "Reset view"}
+        aria-label={
+          hasDefaultWindow
+            ? "Reset the chart's time axis to its default time window"
+            : "Reset the chart's time axis to show all data"
+        }
         onClick={onReset}
       >
         ⟲
