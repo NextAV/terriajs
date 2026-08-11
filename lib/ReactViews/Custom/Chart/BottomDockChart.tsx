@@ -508,13 +508,40 @@ const Chart: React.FC<ChartProps> = observer(
     const activeDomainStop = Number.isFinite(activeDomain[1])
       ? activeDomain[1]
       : undefined;
-    useEffect(() => {
+    useLayoutEffect(() => {
+      // Read the domain AFTER layout, from the scale object itself, rather than
+      // publishing the values captured during render.
+      //
+      // d3's `.nice()` MUTATES a scale in place, and the domain read during render is
+      // taken before the axis renders — so the published domain was the pre-nice one
+      // while every bar, tick and gridline was positioned with the post-nice one.
+      // Measured on the deployed al-Shaheen chart: data ran 2025-01-02..2026-07-03 (547
+      // days) but the rendered axis ran 2025-01-01..2026-10-01 (638 days) — d3 rounds a
+      // time domain out to whole tick intervals. A consumer mapping a date to a pixel
+      // with the published domain is then wrong by 638/547 = a 16.6% SCALE error: 0px at
+      // the left edge and 190px at the right, which is exactly what the discrete tick
+      // rail showed.
+      //
+      // Reading in a layout effect makes this correct whoever mutates the scale and
+      // whenever, instead of racing whatever nices it.
+      const rendered =
+        xAxis.scale === "time" ? xScale.domain().map(Number) : [NaN, NaN];
+      const start = Number.isFinite(rendered[0]) ? rendered[0] : undefined;
+      const stop = Number.isFinite(rendered[1]) ? rendered[1] : undefined;
       onActiveXDomainChange?.(
-        activeDomainStart !== undefined && activeDomainStop !== undefined
-          ? [activeDomainStart, activeDomainStop]
-          : undefined
+        start !== undefined && stop !== undefined ? [start, stop] : undefined
       );
-    }, [activeDomainStart, activeDomainStop, onActiveXDomainChange]);
+      // `activeDomainStart`/`Stop` stay in the deps as the CHANGE SIGNAL: they are the
+      // render-time values, so they still move whenever the underlying data or zoom
+      // changes, which is what should trigger a re-publish. They are deliberately no
+      // longer the values published.
+    }, [
+      activeDomainStart,
+      activeDomainStop,
+      xScale,
+      xAxis.scale,
+      onActiveXDomainChange
+    ]);
 
     if (processedChartItems.length === 0)
       return <div className={Styles.empty}>No data available</div>;
