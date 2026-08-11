@@ -29,10 +29,26 @@ const CHART_MIN_WIDTH = 110;
  *  (the WCAG 2.5.8 minimum is 24); the first version was 22 and read as
  *  cramped against the map's own zoom stack. */
 const CONTROL_SIZE = 30;
-/** Must sit ABOVE any right-docked side panel. The controls live at the
- *  plot's right edge, which on a dashboard with a docked review/queue panel
- *  is underneath it — a lower value renders them perfectly and makes them
- *  unclickable. */
+/**
+ * Stacking order for the zoom controls. Chosen against a host's overlay
+ * ladder, not picked arbitrarily — a component cannot import its host's
+ * scale, so the CONTRACT is written here instead.
+ *
+ * The consuming app (nextview-viewer, `lib/Views/zLadder.ts`) uses:
+ *   0 map · 5 decorative · 10 informational · 50 interactive · 200 modal
+ *
+ * 20 is deliberately BETWEEN informational and interactive:
+ *  - ABOVE a persistent docked panel (10). The controls sit at the plot's
+ *    right edge, which is exactly where a review/queue panel docks; at a
+ *    lower value they render with a correct bounding box and are NOT
+ *    clickable — measured, and a programmatic `.click()` still worked, so
+ *    it hides from any test not using a real pointer.
+ *  - BELOW transient interactive overlays (50) and modals (200). A command
+ *    palette or a feature popup SHOULD cover chart buttons; floating them
+ *    over a modal would be the opposite defect.
+ *
+ * A host whose informational layer sits at or above 20 must raise this.
+ */
 const Z_ABOVE_DOCKED_PANELS = 20;
 const DEFAULT_GRID_COLOR = "#efefef";
 const Y_AXIS_NUM_TICKS = 4;
