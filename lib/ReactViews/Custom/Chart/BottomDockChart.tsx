@@ -806,11 +806,24 @@ const Chart: React.FC<ChartProps> = observer(
           <PointsOnMap chartItems={processedChartItems} />
           {zoomBounded && (
             <ChartZoomControls
-              /* In the RIGHT MARGIN, not over the plot: overlaying the
-               * top-right corner would occlude the newest bars — the most
-               * recent passes, which is what a monitoring feed is read for —
-               * and would swallow wheel events aimed at the zoom surface. */
-              left={adjustedMargin.left + plotWidth + 4}
+              /* TOP-LEFT, inside the plot band. Measured, after two wrong
+               * placements: the top-RIGHT corner occludes the newest bars —
+               * the most recent passes, which is what a monitoring feed is
+               * read for — and the right MARGIN is worse still, because a
+               * right-docked side panel sits over it. On the live al-shaheen
+               * dashboard the expert-review queue panel is `z-index: 10`
+               * across x 1548–1850, so controls at x 1825 rendered, reported
+               * a sane bounding box, and were NOT CLICKABLE by a real mouse
+               * (`elementsFromPoint` returned the panel; a programmatic
+               * .click() worked, which is exactly how this hides from a test
+               * that does not use a real pointer).
+               *
+               * Left is the durable side: this app docks panels right, and
+               * the leftmost bars are the OLDEST — the cheapest 22px of plot
+               * to cover. Raising z-index above the panel was rejected: the
+               * panel is a working surface, and floating chart buttons over
+               * someone's review queue is worse than moving the buttons. */
+              left={adjustedMargin.left + 4}
               top={adjustedMargin.top + 4}
               hasDefaultWindow={!!defaultWindow}
               onZoomIn={() => zoomApiRef.current?.scaleBy(1.6)}
