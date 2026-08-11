@@ -4,6 +4,10 @@ import { FC, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import JulianDate from "terriajs-cesium/Source/Core/JulianDate";
 import ChartView from "../../../Charts/ChartView";
+import {
+  latestPointMs,
+  stalenessDays
+} from "../../../Charts/chartZoomWindow";
 import Result from "../../../Core/Result";
 import MappableMixin from "../../../ModelMixins/MappableMixin";
 import Icon from "../../../Styled/Icon";
@@ -33,10 +37,36 @@ interface ChartPanelProps {
    * absent (every caller that doesn't pass it) → full extent, byte-identical.
    */
   defaultTimeWindowDays?: number;
+  /**
+   * Optional noun for the staleness caption, e.g. "pass" renders
+   * "last pass: 2026-07-03 (39 days ago)". Absent (every caller that does
+   * not pass it) → NO caption at all, byte-identical to before.
+   *
+   * The caption exists because a chart windowed onto the last N days of its
+   * own DATA is always full — which is what makes it readable, and also what
+   * makes a stalled feed look current. Rather than move the anchor to the
+   * wall clock (which would open the chart on empty space), the window keeps
+   * its anchor and the gap is stated.
+   */
+  stalenessLabel?: string;
+  /**
+   * Optional: called when the user presses the chart's reset control, AFTER
+   * the chart has restored its own time window. Lets the consumer restore
+   * anything the chart does not own — notably the timeline CLOCK, so "reset"
+   * means the view you had at login rather than only the axis you had at
+   * login.
+   */
+  onResetView?: () => void;
 }
 
 const ChartPanel: FC<ChartPanelProps> = observer(
-  ({ onHeightChange, showSelectedDate, defaultTimeWindowDays }) => {
+  ({
+    onHeightChange,
+    showSelectedDate,
+    defaultTimeWindowDays,
+    stalenessLabel,
+    onResetView
+  }) => {
     const { t } = useTranslation();
     const viewState = useViewState();
 
@@ -145,6 +175,24 @@ const ChartPanel: FC<ChartPanelProps> = observer(
         ? new Date(selectedTimeMs).toISOString().slice(0, 10)
         : undefined;
 
+    // Staleness caption (opt-in). A chart windowed onto the last N days of
+    // its own DATA is always full — readable, but it also makes a feed that
+    // stopped updating look current, because the right edge is still the
+    // newest bar. The window keeps its data anchor (moving it to the wall
+    // clock would open the chart on empty space) and the gap is SAID instead.
+    // Silent when the feed is current, so a healthy dashboard carries no
+    // extra noise.
+    const lastDataMs = stalenessLabel ? latestPointMs(chartItems) : undefined;
+    const staleDays = stalenessLabel
+      ? stalenessDays(lastDataMs, Date.now())
+      : undefined;
+    const stalenessCaption =
+      staleDays !== undefined && lastDataMs !== undefined
+        ? `last ${stalenessLabel}: ${new Date(lastDataMs)
+            .toISOString()
+            .slice(0, 10)} (${staleDays} day${staleDays === 1 ? "" : "s"} ago)`
+        : undefined;
+
     const chart = useMemo(() => {
       const items = viewState.terria.workbench.items;
       if (items.length === 0) return;
@@ -172,6 +220,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           onActiveXDomainChange={setChartActiveXDomain}
           selectedTimeMs={selectedTimeMs}
           defaultTimeWindowDays={defaultTimeWindowDays}
+          onResetView={onResetView}
         />
       );
       // `selectedTimeMs` is a dep so the marker moves on scrub. This re-runs the
@@ -191,7 +240,8 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       setChartPlotBand,
       setChartActiveXDomain,
       selectedTimeMs,
-      defaultTimeWindowDays
+      defaultTimeWindowDays,
+      onResetView
     ]);
 
     if (chartItems.length === 0) {
@@ -219,6 +269,22 @@ const ChartPanel: FC<ChartPanelProps> = observer(
                     </span>
                   ) : (
                     t("chart.sectionLabel")
+                  )}
+                  {stalenessCaption && (
+                    /* Subordinate to the selected date, and deliberately not
+                     * an alarm colour: this states a fact about the feed, it
+                     * does not assert a fault. */
+                    <span
+                      style={{
+                        marginLeft: 10,
+                        fontSize: "12px",
+                        fontWeight: 400,
+                        opacity: 0.75
+                      }}
+                      title="The newest observation in this chart. The view is anchored to the data, not to the current date."
+                    >
+                      {stalenessCaption}
+                    </span>
                   )}
                 </label>
                 <ChartPanelDownloadButton

@@ -133,3 +133,32 @@ export function panTargetIsReachable(
   if (!Number.isFinite(px)) return false;
   return px >= lo && px <= hi;
 }
+
+/**
+ * How stale the newest data point is, for a caption that states it.
+ *
+ * A chart windowed onto the last N days OF ITS DATA (see `defaultTimeWindow`)
+ * is always full, which is what makes it readable — but it also means a feed
+ * that stopped updating LOOKS current, because its right edge is still the
+ * newest bar. On a product whose contract is "did we look?", that is exactly
+ * the wrong thing to leave implied, so the window keeps its anchor and the
+ * staleness is SAID instead.
+ *
+ * Returns undefined when there is no data or when the gap is below
+ * `minDays` — a feed that is current should carry no caption at all, rather
+ * than a reassuring "0 days ago" that adds noise to every other dashboard.
+ *
+ * `nowMs` is a parameter, never `Date.now()` read inside: this has to be
+ * testable, and a function that reads the clock itself cannot be.
+ */
+export function stalenessDays(
+  lastMs: number | undefined,
+  nowMs: number,
+  minDays = 2
+): number | undefined {
+  if (lastMs === undefined || !Number.isFinite(lastMs)) return undefined;
+  if (!Number.isFinite(nowMs)) return undefined;
+  const days = Math.floor((nowMs - lastMs) / (24 * 60 * 60 * 1000));
+  if (!Number.isFinite(days) || days < minDays) return undefined;
+  return days;
+}
