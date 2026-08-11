@@ -665,6 +665,27 @@ export default class Terria {
   }
 
   /**
+   * The bottom-dock chart's plot area in ABSOLUTE VIEWPORT pixels, `[left, right]`.
+   *
+   * Supersedes `bottomChartPlotFrac` for pixel-aligning a scrubber. Those fractions are
+   * fractions of the chart's `width` PROP, while the chart renders its root
+   * `<svg width="100%">` — so a consumer multiplying them by the element it measures is
+   * wrong by the ratio between the two, and NO element carries the prop's value for it to
+   * find. Measured 1243 vs 1450 on the al-Shaheen dock: a SCALE error, 0px at the left
+   * edge growing to 190px at the right. VIEWPORT-relative (it comes from
+   * `getBoundingClientRect`), so a consumer must compare it against other
+   * `getBoundingClientRect` reads — not `offsetLeft` or page coordinates, which differ by
+   * `scrollX`. Written by `ChartPanel`; UI-transient; `.ref`.
+   */
+  @observable.ref
+  bottomChartPlotBand: [number, number] | undefined = undefined;
+
+  @action
+  setBottomChartPlotBand(band: [number, number] | undefined) {
+    this.bottomChartPlotBand = band;
+  }
+
+  /**
    * The bottom-dock chart's ACTIVE x-domain as `[startMs, stopMs]` epoch-ms:
    * the zoomed window while a d3 zoom is applied, else the chart's INITIAL
    * (data-extent-padded) domain. Unlike `bottomChartXDomain` (zoom events

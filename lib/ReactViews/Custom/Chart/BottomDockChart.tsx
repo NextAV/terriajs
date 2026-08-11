@@ -7,11 +7,8 @@ import { scaleLinear, scaleTime } from "@visx/scale";
 import groupBy from "lodash-es/groupBy";
 import minBy from "lodash-es/minBy";
 import { observer } from "mobx-react";
-import { useEffect, useMemo, useState } from "react";
-import {
-  columnForInstant,
-  columnSpanMs
-} from "../../../Charts/barColumnSnap";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { columnForInstant, columnSpanMs } from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartAxis, ChartItem } from "../../../ModelMixins/ChartableMixin";
 import Styles from "./bottom-dock-chart.scss";
@@ -45,6 +42,21 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
   onXDomainChange?: (domain: [number, number] | undefined) => void;
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
   /**
+   * Plot area in ABSOLUTE VIEWPORT pixels, `[left, right]`.
+   *
+   * Supersedes `onPlotFracChange` for any consumer mapping a date to a screen position.
+   * Those fractions are fractions of the `width` PROP, but this component renders its root
+   * `<svg width="100%">` — so when the prop and the rendered width differ (measured 1243 vs
+   * 1450 on the al-Shaheen dock) a consumer multiplying the fractions by the element it
+   * measures is wrong by exactly that ratio, and NO element in the DOM carries the prop's
+   * value for it to find. The error is a SCALE error, so it grows with x: it was 0px at the
+   * left edge and 190px at the right. Publishing absolute pixels removes the shared-base
+   * assumption rather than asking each consumer to guess the base correctly.
+   *
+   * Same stable-callback requirement as the callbacks above.
+   */
+  onPlotBandChange?: (band: [number, number] | undefined) => void;
+  /**
    * Optional: publishes the chart's ACTIVE x-domain — the zoomed domain when a
    * d3 zoom is applied, else the initial (data-extent-padded) domain — as
    * [startMs, stopMs], on every domain change including first mount. This is
@@ -77,6 +89,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
     margin,
     onXDomainChange,
     onPlotFracChange,
+    onPlotBandChange,
     onActiveXDomainChange,
     selectedTimeMs
   }) => {
@@ -89,6 +102,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         width={Math.max(CHART_MIN_WIDTH, width || parentWidth)}
         onXDomainChange={onXDomainChange}
         onPlotFracChange={onPlotFracChange}
+        onPlotBandChange={onPlotBandChange}
         onActiveXDomainChange={onActiveXDomainChange}
         selectedTimeMs={selectedTimeMs}
       />
@@ -125,6 +139,21 @@ interface ChartProps {
    */
   onPlotFracChange?: (frac: [number, number] | undefined) => void;
   /**
+   * Plot area in ABSOLUTE VIEWPORT pixels, `[left, right]`.
+   *
+   * Supersedes `onPlotFracChange` for any consumer mapping a date to a screen position.
+   * Those fractions are fractions of the `width` PROP, but this component renders its root
+   * `<svg width="100%">` — so when the prop and the rendered width differ (measured 1243 vs
+   * 1450 on the al-Shaheen dock) a consumer multiplying the fractions by the element it
+   * measures is wrong by exactly that ratio, and NO element in the DOM carries the prop's
+   * value for it to find. The error is a SCALE error, so it grows with x: it was 0px at the
+   * left edge and 190px at the right. Publishing absolute pixels removes the shared-base
+   * assumption rather than asking each consumer to guess the base correctly.
+   *
+   * Same stable-callback requirement as the callbacks above.
+   */
+  onPlotBandChange?: (band: [number, number] | undefined) => void;
+  /**
    * Fired with the ACTIVE x-domain [startMs, stopMs] (zoomed if zoomed, else
    * the padded initial domain), on mount and on every domain change; the same
    * stable-callback requirement as the two callbacks above.
@@ -143,6 +172,7 @@ const Chart: React.FC<ChartProps> = observer(
     margin = DEFAULT_MARGIN,
     onXDomainChange,
     onPlotFracChange,
+    onPlotBandChange,
     onActiveXDomainChange,
     selectedTimeMs
   }) => {
@@ -152,6 +182,11 @@ const Chart: React.FC<ChartProps> = observer(
     const [mouseCoords, setMouseCoords] = useState<
       { x: number; y: number } | undefined
     >(undefined);
+    // The rendered root svg — the ONLY element that knows the plot's true screen base.
+    // `width="100%"` means its box is the container's, which is NOT the `width` prop the
+    // margins and plotWidth were computed against; measuring it here and publishing an
+    // absolute band is what saves every consumer from having to reconcile the two.
+    const rootSvgRef = useRef<SVGSVGElement | null>(null);
 
     const processedChartItems: ChartItem[] = useMemo(() => {
       return sortChartItemsByType(propsChartItems)
@@ -299,11 +334,11 @@ const Chart: React.FC<ChartProps> = observer(
     }, [processedChartItems]);
     const markerTimeMs =
       selectedTimeMs != null && Number.isFinite(selectedTimeMs)
-        ? columnForInstant(
+        ? (columnForInstant(
             selectedTimeMs,
             barColumns.starts,
             barColumns.spanMs
-          ) ?? selectedTimeMs
+          ) ?? selectedTimeMs)
         : selectedTimeMs;
     const selectedX =
       markerTimeMs != null &&
@@ -440,6 +475,27 @@ const Chart: React.FC<ChartProps> = observer(
       );
     }, [leftFrac, rightFrac, xAxis.scale, onPlotFracChange]);
 
+    // Absolute plot band, in VIEWPORT pixels (getBoundingClientRect). Measured AFTER layout (useLayoutEffect) from the
+    // rendered svg, then offset by the same `adjustedMargin.left` / `plotWidth` the plot is
+    // actually drawn with — user units map 1:1 to CSS px here (no viewBox), so this is the
+    // exact band, not an estimate. Recomputed whenever anything that can move it changes,
+    // including a window resize, which shifts the box without re-rendering this component.
+    useLayoutEffect(() => {
+      if (!onPlotBandChange) return;
+      const publish = () => {
+        const el = rootSvgRef.current;
+        if (!el || xAxis.scale !== "time" || !(plotWidth > 0)) {
+          onPlotBandChange(undefined);
+          return;
+        }
+        const left = el.getBoundingClientRect().left + adjustedMargin.left;
+        onPlotBandChange([left, left + plotWidth]);
+      };
+      publish();
+      window.addEventListener("resize", publish);
+      return () => window.removeEventListener("resize", publish);
+    }, [onPlotBandChange, adjustedMargin.left, plotWidth, height, xAxis.scale]);
+
     // Publish the ACTIVE x-domain (zoomed if zoomed, else the padded initial
     // domain) for date→pixel consumers — the missing half of onXDomainChange,
     // which only fires on zoom EVENTS and so never carries the initial padded
@@ -514,6 +570,7 @@ const Chart: React.FC<ChartProps> = observer(
         <Legends width={plotWidth} chartItems={processedChartItems} />
         <div style={{ position: "relative" }}>
           <svg
+            ref={rootSvgRef}
             width="100%"
             height={height}
             onMouseMove={setMouseCoordsFromEvent}
