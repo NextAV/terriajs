@@ -25,10 +25,18 @@ interface ChartPanelProps {
    * (every other tenant) → the stock "Charts" label + no marker, byte-identical.
    */
   showSelectedDate?: boolean;
+  /**
+   * Optional per-tenant value for the chart's initial time window: open on
+   * the last N days OF THE DATA instead of the full extent (see
+   * `BottomDockChartProps.defaultTimeWindowDays`). The CAPABILITY is
+   * unconditional in the chart; this prop is only the tenant's NUMBER —
+   * absent (every caller that doesn't pass it) → full extent, byte-identical.
+   */
+  defaultTimeWindowDays?: number;
 }
 
 const ChartPanel: FC<ChartPanelProps> = observer(
-  ({ onHeightChange, showSelectedDate }) => {
+  ({ onHeightChange, showSelectedDate, defaultTimeWindowDays }) => {
     const { t } = useTranslation();
     const viewState = useViewState();
 
@@ -163,6 +171,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           onPlotBandChange={setChartPlotBand}
           onActiveXDomainChange={setChartActiveXDomain}
           selectedTimeMs={selectedTimeMs}
+          defaultTimeWindowDays={defaultTimeWindowDays}
         />
       );
       // `selectedTimeMs` is a dep so the marker moves on scrub. This re-runs the
@@ -181,7 +190,8 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       setChartPlotFrac,
       setChartPlotBand,
       setChartActiveXDomain,
-      selectedTimeMs
+      selectedTimeMs,
+      defaultTimeWindowDays
     ]);
 
     if (chartItems.length === 0) {
