@@ -30,26 +30,22 @@ const CHART_MIN_WIDTH = 110;
  *  cramped against the map's own zoom stack. */
 const CONTROL_SIZE = 30;
 /**
- * Stacking order for the zoom controls. Chosen against a host's overlay
- * ladder, not picked arbitrarily — a component cannot import its host's
- * scale, so the CONTRACT is written here instead.
+ * Stacking order for the zoom controls, WITHIN the chart's own subtree.
  *
- * The consuming app (nextview-viewer, `lib/Views/zLadder.ts`) uses:
- *   0 map · 5 decorative · 10 informational · 50 interactive · 200 modal
+ * ERRATUM. An earlier version of this constant was named
+ * `Z_ABOVE_DOCKED_PANELS` and claimed it lifted the controls above a
+ * right-docked side panel. That was wrong, and the reason is worth keeping:
+ * the consuming app wraps the whole bottom dock in
+ * `position:absolute; z-index:5`, which CREATES A STACKING CONTEXT, while
+ * the panel is a SIBLING subtree at a higher z-index. Every z-index in here
+ * — 2, 20, or 99999 — is therefore resolved *inside* the dock, and the dock
+ * paints as one unit. No value here can climb above a sibling.
  *
- * 20 is deliberately BETWEEN informational and interactive:
- *  - ABOVE a persistent docked panel (10). The controls sit at the plot's
- *    right edge, which is exactly where a review/queue panel docks; at a
- *    lower value they render with a correct bounding box and are NOT
- *    clickable — measured, and a programmatic `.click()` still worked, so
- *    it hides from any test not using a real pointer.
- *  - BELOW transient interactive overlays (50) and modals (200). A command
- *    palette or a feature popup SHOULD cover chart buttons; floating them
- *    over a modal would be the opposite defect.
- *
- * A host whose informational layer sits at or above 20 must raise this.
+ * The overlap was fixed where it actually lives: the host now sizes that
+ * panel to stop at the top of the dock. This value only orders the controls
+ * against other chart children, which is all a chart component can do.
  */
-const Z_ABOVE_DOCKED_PANELS = 20;
+const Z_ABOVE_CHART_CHILDREN = 2;
 const DEFAULT_GRID_COLOR = "#efefef";
 const Y_AXIS_NUM_TICKS = 4;
 const Y_AXIS_TICK_LABEL_FONT_SIZE = 10;
@@ -855,11 +851,14 @@ const Chart: React.FC<ChartProps> = observer(
                * a real pointer. They then moved left; the owner asked for
                * right, larger.
                *
-               * So they come back to the right WITH the z-index that makes
-               * them reachable — the one thing the earlier placement lacked.
-               * `Z_ABOVE_DOCKED_PANELS` must stay above any right-docked
-               * panel or this silently regresses to unclickable. Verify with
-               * `elementsFromPoint`, never with `.click()`. */
+               * They come back to the right because the OVERLAP was removed
+               * at its source: the host now sizes that panel to stop at the
+               * top of the dock, which also un-hid the newest bars it had
+               * been covering. A z-index here could never have done it — the
+               * dock is its own stacking context (see
+               * `Z_ABOVE_CHART_CHILDREN`). Verify placement with
+               * `elementsFromPoint`, never with `.click()`: a programmatic
+               * click drives the zoom even when the button is buried. */
               left={adjustedMargin.left + plotWidth - CONTROL_SIZE - 4}
               top={adjustedMargin.top + 4}
               hasDefaultWindow={!!defaultWindow}
@@ -926,7 +925,7 @@ const ChartZoomControls: React.FC<{
         display: "flex",
         flexDirection: "column",
         gap: 4,
-        zIndex: Z_ABOVE_DOCKED_PANELS
+        zIndex: Z_ABOVE_CHART_CHILDREN
       }}
     >
       <button
