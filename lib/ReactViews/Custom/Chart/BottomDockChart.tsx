@@ -25,6 +25,27 @@ import { Cursor, Plot, PointsOnMap, XAxis, YAxis } from "./utils";
 import { ZoomX, type ZoomXApi } from "./ZoomX";
 
 const CHART_MIN_WIDTH = 110;
+/** Zoom-control button edge, px. Sized for a comfortable pointer target
+ *  (the WCAG 2.5.8 minimum is 24); the first version was 22 and read as
+ *  cramped against the map's own zoom stack. */
+const CONTROL_SIZE = 30;
+/**
+ * Stacking order for the zoom controls, WITHIN the chart's own subtree.
+ *
+ * ERRATUM. An earlier version of this constant was named
+ * `Z_ABOVE_DOCKED_PANELS` and claimed it lifted the controls above a
+ * right-docked side panel. That was wrong, and the reason is worth keeping:
+ * the consuming app wraps the whole bottom dock in
+ * `position:absolute; z-index:5`, which CREATES A STACKING CONTEXT, while
+ * the panel is a SIBLING subtree at a higher z-index. Every z-index in here
+ * — 2, 20, or 99999 — is therefore resolved *inside* the dock, and the dock
+ * paints as one unit. No value here can climb above a sibling.
+ *
+ * The overlap was fixed where it actually lives: the host now sizes that
+ * panel to stop at the top of the dock. This value only orders the controls
+ * against other chart children, which is all a chart component can do.
+ */
+const Z_ABOVE_CHART_CHILDREN = 2;
 const DEFAULT_GRID_COLOR = "#efefef";
 const Y_AXIS_NUM_TICKS = 4;
 const Y_AXIS_TICK_LABEL_FONT_SIZE = 10;
@@ -93,6 +114,13 @@ interface BottomDockChartProps extends WithParentSizeProvidedProps {
    * capability lives here and each tenant supplies its own number.
    */
   defaultTimeWindowDays?: number;
+  /**
+   * Optional: called when the user presses the reset control, AFTER the chart
+   * has restored its own time window. The chart owns its axis; the CLOCK
+   * belongs to the timeline, so a consumer that wants "reset" to mean "the
+   * view I had at login" restores that here.
+   */
+  onResetView?: () => void;
 }
 
 const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
@@ -108,7 +136,8 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
     onPlotBandChange,
     onActiveXDomainChange,
     selectedTimeMs,
-    defaultTimeWindowDays
+    defaultTimeWindowDays,
+    onResetView
   }) => {
     return (
       <Chart
@@ -123,6 +152,7 @@ const _BottomDockChart: React.FC<BottomDockChartProps> = observer(
         onActiveXDomainChange={onActiveXDomainChange}
         selectedTimeMs={selectedTimeMs}
         defaultTimeWindowDays={defaultTimeWindowDays}
+        onResetView={onResetView}
       />
     );
   }
@@ -181,6 +211,8 @@ interface ChartProps {
   selectedTimeMs?: number;
   /** Last-N-days-of-data initial window; see `BottomDockChartProps`. */
   defaultTimeWindowDays?: number;
+  /** Called after the reset control restores the window; see `BottomDockChartProps`. */
+  onResetView?: () => void;
 }
 
 const Chart: React.FC<ChartProps> = observer(
@@ -195,7 +227,8 @@ const Chart: React.FC<ChartProps> = observer(
     onPlotBandChange,
     onActiveXDomainChange,
     selectedTimeMs,
-    defaultTimeWindowDays
+    defaultTimeWindowDays,
+    onResetView
   }) => {
     const [zoomedXScale, setZoomedXScale] = useState<XScale | undefined>(
       undefined
@@ -806,24 +839,27 @@ const Chart: React.FC<ChartProps> = observer(
           <PointsOnMap chartItems={processedChartItems} />
           {zoomBounded && (
             <ChartZoomControls
-              /* TOP-LEFT, inside the plot band. Measured, after two wrong
-               * placements: the top-RIGHT corner occludes the newest bars —
-               * the most recent passes, which is what a monitoring feed is
-               * read for — and the right MARGIN is worse still, because a
-               * right-docked side panel sits over it. On the live al-shaheen
-               * dashboard the expert-review queue panel is `z-index: 10`
-               * across x 1548–1850, so controls at x 1825 rendered, reported
-               * a sane bounding box, and were NOT CLICKABLE by a real mouse
-               * (`elementsFromPoint` returned the panel; a programmatic
-               * .click() worked, which is exactly how this hides from a test
-               * that does not use a real pointer).
+              /* RIGHT edge of the plot band (owner call, 2026-08-11).
                *
-               * Left is the durable side: this app docks panels right, and
-               * the leftmost bars are the OLDEST — the cheapest 22px of plot
-               * to cover. Raising z-index above the panel was rejected: the
-               * panel is a working surface, and floating chart buttons over
-               * someone's review queue is worse than moving the buttons. */
-              left={adjustedMargin.left + 4}
+               * History worth keeping, because the right side is CONTESTED:
+               * these first sat in the right MARGIN and were invisible to a
+               * real mouse — the expert-review queue panel is `z-index: 10`
+               * across x 1548–1850 on al-shaheen, so the buttons rendered
+               * with a correct bounding box while `elementsFromPoint`
+               * returned the panel. A programmatic `.click()` still drove the
+               * zoom, which is exactly how that hides from any test not using
+               * a real pointer. They then moved left; the owner asked for
+               * right, larger.
+               *
+               * They come back to the right because the OVERLAP was removed
+               * at its source: the host now sizes that panel to stop at the
+               * top of the dock, which also un-hid the newest bars it had
+               * been covering. A z-index here could never have done it — the
+               * dock is its own stacking context (see
+               * `Z_ABOVE_CHART_CHILDREN`). Verify placement with
+               * `elementsFromPoint`, never with `.click()`: a programmatic
+               * click drives the zoom even when the button is buried. */
+              left={adjustedMargin.left + plotWidth - CONTROL_SIZE - 4}
               top={adjustedMargin.top + 4}
               hasDefaultWindow={!!defaultWindow}
               onZoomIn={() => zoomApiRef.current?.scaleBy(1.6)}
@@ -832,6 +868,10 @@ const Chart: React.FC<ChartProps> = observer(
                 if (defaultWindow)
                   zoomApiRef.current?.zoomToDomain(defaultWindow);
                 else zoomApiRef.current?.resetIdentity();
+                // The chart owns its axis; the CLOCK belongs to the timeline.
+                // Restoring both is what makes "reset" mean the view you had
+                // at login rather than only the axis you had at login.
+                onResetView?.();
               }}
             />
           )}
@@ -863,14 +903,16 @@ const ChartZoomControls: React.FC<{
   onReset: () => void;
 }> = ({ left, top, hasDefaultWindow, onZoomIn, onZoomOut, onReset }) => {
   const button: React.CSSProperties = {
-    width: 22,
-    height: 22,
+    width: CONTROL_SIZE,
+    height: CONTROL_SIZE,
     padding: 0,
-    border: "1px solid rgba(255,255,255,0.25)",
-    borderRadius: 3,
-    background: "rgba(0,0,0,0.45)",
+    border: "1px solid rgba(255,255,255,0.35)",
+    borderRadius: 4,
+    // Opaque enough to stay legible over bars AND over a docked panel it may
+    // overlap — a translucent button on a busy background reads as an artifact.
+    background: "rgba(0,0,0,0.72)",
     color: "#ffffff",
-    font: "14px/1 Arial, sans-serif",
+    font: "18px/1 Arial, sans-serif",
     cursor: "pointer",
     display: "block"
   };
@@ -882,8 +924,8 @@ const ChartZoomControls: React.FC<{
         top,
         display: "flex",
         flexDirection: "column",
-        gap: 3,
-        zIndex: 2
+        gap: 4,
+        zIndex: Z_ABOVE_CHART_CHILDREN
       }}
     >
       <button
@@ -906,7 +948,7 @@ const ChartZoomControls: React.FC<{
       </button>
       <button
         type="button"
-        style={{ ...button, fontSize: 12 }}
+        style={{ ...button, fontSize: 15 }}
         /* Name what it actually does. `⟲` conventionally reads as "fit all",
          * but with a default window configured this zooms IN to that window
          * from a fully zoomed-out view — surprising unless the label says so. */

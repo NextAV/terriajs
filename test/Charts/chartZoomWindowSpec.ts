@@ -2,6 +2,7 @@ import {
   defaultTimeWindow,
   latestPointMs,
   panTargetIsReachable,
+  stalenessDays,
   transformForDomain,
   zoomActionForDomain
 } from "../../lib/Charts/chartZoomWindow";
@@ -163,6 +164,39 @@ describe("chartZoomWindow", function () {
       expect(panTargetIsReachable(NaN, -Infinity, Infinity)).toBe(false);
       expect(panTargetIsReachable(NaN, 0, 1000)).toBe(false);
       expect(panTargetIsReachable(Infinity, 0, 1000)).toBe(false);
+    });
+  });
+
+  describe("stalenessDays", function () {
+    const last = ms("2026-07-03T00:00:00Z");
+    const now = ms("2026-08-11T00:00:00Z");
+
+    it("reports the gap the caption states", function () {
+      // The number in "last pass: 2026-07-03 (39 days ago)".
+      expect(stalenessDays(last, now)).toBe(39);
+    });
+
+    it("is SILENT on a current feed, so a healthy dashboard gains no noise", function () {
+      expect(stalenessDays(now, now)).toBeUndefined();
+      expect(stalenessDays(now - DAY, now)).toBeUndefined(); // 1 day < minDays 2
+    });
+
+    it("floors rather than rounds, so the caption never overstates the gap", function () {
+      // 39 days and 23 hours is still "39 days ago", never "40".
+      expect(stalenessDays(last, now + 23 * 60 * 60 * 1000)).toBe(39);
+    });
+
+    it("returns undefined with no data or an unusable clock", function () {
+      expect(stalenessDays(undefined, now)).toBeUndefined();
+      expect(stalenessDays(NaN, now)).toBeUndefined();
+      expect(stalenessDays(last, NaN)).toBeUndefined();
+    });
+
+    it("does not read the clock itself — `nowMs` is injected", function () {
+      // A function that read Date.now() internally could not be asserted
+      // against a fixed date at all; this test only exists because it does not.
+      expect(stalenessDays(last, ms("2026-07-10T00:00:00Z"))).toBe(7);
+      expect(stalenessDays(last, ms("2027-07-03T00:00:00Z"))).toBe(365);
     });
   });
 });
