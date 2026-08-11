@@ -31,31 +31,31 @@ export const Plot = memo(
   ({ chartItems, initialScales, zoomedScales }: PlotProps) => {
     const chartRefs = useRef<{ id: string; zoomHandle: ChartZoomHandle }[]>([]);
 
-    // Bar series are centred on their x, so several on one axis land on the SAME pixels
-    // and the later-painted one covers the earlier one wherever its value is greater or
-    // equal. Give each its position among the bar series so BarChart can inset them
-    // (declaration order = paint order = widest-to-narrowest, back-to-front), share ONE
-    // set of points to measure the band from, and let exactly ONE draw the click targets.
+    // Bar series are centred on their x, so several on one axis land on the SAME pixels.
+    // Two things follow, and both are inert for a single bar series — every chart that
+    // exists today bar one.
     //
-    // The hit layer goes to the BACKMOST bar series, never to "the one with the most
-    // points". A full-height hit rect is a PAINTED element (`fill="transparent"` still
-    // satisfies `pointer-events: visiblePainted`), so whichever series draws it last owns
-    // every click on the plot: the series behind it become unclickable and clicks resolve
-    // to the wrong series' nearest point. Drawn by the backmost series it can cover
-    // nothing. This is why the composer must declare the series with the finest x tiling
-    // first — it is both the backdrop and the click surface.
+    // WIDTH: every bar series measures its width from ONE shared set of points, so all
+    // series on a chart render at an IDENTICAL width. Measuring per-series makes the
+    // width a function of which series happens to hold the tightest pair — a sparse
+    // series then draws visibly wider bars than a dense one on the same axis, which
+    // reads as a rendering fault rather than as data. Equal widths mean the series
+    // painted last is the one you see, so the composer declares the CONTEXT series
+    // first and the PRODUCT last; that is sound only because the product's dates are a
+    // subset of the context's, so a covered context bar tells the reader nothing the
+    // product bar has not already told them.
     //
-    // All inert for a single bar series, which is every chart that exists today bar one.
+    // CLICKS: the hit layer goes to the BACKMOST bar series, never to "the one with the
+    // most points". A full-height hit rect is a PAINTED element (`fill="transparent"`
+    // still satisfies `pointer-events: visiblePainted`), so whichever series draws it
+    // last owns every click on the plot: the series behind it become unclickable and
+    // clicks resolve to the wrong series' nearest point. Drawn by the backmost series
+    // it can cover nothing. So the composer's first-declared series is both the
+    // backdrop and the click surface, and should be the one with the finest x tiling.
     const barPositions = useMemo(() => {
       const indices = chartItems
         .map((c, i) => (c.type === "bar" ? i : -1))
         .filter((i) => i >= 0);
-      const order = new Map<number, number>();
-      indices.forEach((i, position) => order.set(i, position));
-      // Measured from the union, so every series insets from the SAME band. Deriving it
-      // per-series makes the "each series is narrower than the one behind it" guarantee
-      // depend on which series happens to hold the tightest pair — it then silently stops
-      // holding on data that merely looks different.
       // y-filtered to match what BarChart actually DRAWS. A point with a finite x but a
       // non-finite y is never rendered as a bar, yet left in the band source it tightens
       // the band for every series on the chart (measured 7.00px -> 2.10px, 70% thinner)
@@ -68,7 +68,6 @@ export const Plot = memo(
             )
           : undefined;
       return {
-        order,
         count: indices.length,
         hitLayerIndex: indices.length > 0 ? indices[0] : -1,
         bandPoints
@@ -114,8 +113,6 @@ export const Plot = memo(
                   id={id}
                   chartItem={chartItem}
                   scales={initialScales[i]}
-                  seriesIndex={barPositions.order.get(i) ?? 0}
-                  seriesCount={barPositions.count}
                   rendersHitLayer={
                     barPositions.count < 2 || barPositions.hitLayerIndex === i
                   }

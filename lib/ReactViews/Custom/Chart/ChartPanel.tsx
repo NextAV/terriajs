@@ -49,6 +49,12 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       [viewState.terria]
     );
 
+    const setChartPlotBand = useCallback(
+      (band: [number, number] | undefined) =>
+        viewState.terria.setBottomChartPlotBand(band),
+      [viewState.terria]
+    );
+
     const setChartActiveXDomain = useCallback(
       (domain: [number, number] | undefined) =>
         viewState.terria.setBottomChartActiveXDomain(domain),
@@ -62,6 +68,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
       () => () => {
         viewState.terria.setBottomChartXDomain(undefined);
         viewState.terria.setBottomChartPlotFrac(undefined);
+        viewState.terria.setBottomChartPlotBand(undefined);
         viewState.terria.setBottomChartActiveXDomain(undefined);
       },
       [viewState.terria]
@@ -153,6 +160,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
           height={CHART_PANEL_HEIGHT - CHART_LEGEND_HEIGHT}
           onXDomainChange={setChartXDomain}
           onPlotFracChange={setChartPlotFrac}
+            onPlotBandChange={setChartPlotBand}
           onActiveXDomainChange={setChartActiveXDomain}
           selectedTimeMs={selectedTimeMs}
         />

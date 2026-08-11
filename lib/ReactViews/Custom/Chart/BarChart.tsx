@@ -1,7 +1,6 @@
 import { observer } from "mobx-react";
 import { forwardRef, useImperativeHandle } from "react";
 import { computeHitBounds } from "../../../Charts/barHitBounds";
-import { seriesBarWidth } from "../../../Charts/barSeriesWidth";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import type { ChartItem } from "../../../ModelMixins/ChartableMixin";
 import type { ChartZoomHandle, Scales } from "./types";
@@ -11,14 +10,6 @@ interface Props {
   chartItem: ChartItem;
   scales: Scales;
   color?: string;
-  /**
-   * Position of this series among the bar series sharing the chart, and how many there
-   * are. Bar series are centred on their x, so co-located series would otherwise cover
-   * each other completely; each series after the first is drawn narrower so the one
-   * behind it stays visible. Defaults (0 / 1) make a single-series chart byte-identical.
-   */
-  seriesIndex?: number;
-  seriesCount?: number;
   /**
    * Whether this series draws the transparent click targets. With several bar series on
    * one axis every series would otherwise draw its own, and a full-height hit rect is a
@@ -91,8 +82,6 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
       chartItem,
       scales,
       color,
-      seriesIndex = 0,
-      seriesCount = 1,
       rendersHitLayer = true,
       bandPoints
     },
@@ -129,11 +118,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
           if (hit && hit.length !== bars.length) return;
           // Inset AFTER re-measuring the band, so the nesting holds at every zoom level
           // rather than only at the initial scale.
-          const width = seriesBarWidth(
-            computeBarWidth(bandPoints ?? bars, zoomed.x),
-            seriesIndex,
-            seriesCount
-          );
+          const width = computeBarWidth(bandPoints ?? bars, zoomed.x);
           // Recomputed from the ZOOMED mapping: the tiling depends on pixel spacing,
           // which zoom changes, so a hit area computed at the initial scale would
           // drift out from under its bar as soon as the user zooms.
@@ -163,8 +148,6 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
         bars,
         scales,
         chartItem,
-        seriesIndex,
-        seriesCount,
         rendersHitLayer,
         bandPoints
       ]
@@ -174,11 +157,7 @@ const _BarChart = forwardRef<ChartZoomHandle, Props>(
     // Band from the SHARED points (all bar series) so every series insets from the same
     // basis; per-series bands made the "each series is narrower than the one behind it"
     // guarantee depend on which series happened to hold the tightest pair.
-    const width = seriesBarWidth(
-      computeBarWidth(bandPoints ?? bars, scales.x),
-      seriesIndex,
-      seriesCount
-    );
+    const width = computeBarWidth(bandPoints ?? bars, scales.x);
     // Anchor at the plot bottom (the larger end of the inverted [height, 0] y-range).
     // A bar's HEIGHT is baseline - scales.y(value), so it is proportional to `value`
     // only when the y-domain includes 0 (then scales.y(0) == baseline). calculateDomainY
