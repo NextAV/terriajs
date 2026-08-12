@@ -10,6 +10,7 @@ import { observer } from "mobx-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { columnForInstant, columnSpanMs } from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
+import { controlStackLeft } from "../../../Charts/chartControlPlacement";
 import {
   defaultTimeWindow,
   latestPointMs
@@ -289,6 +290,13 @@ const Chart: React.FC<ChartProps> = observer(
 
     const plotWidth = width - margin.left - margin.right - estimatedYAxesWidth;
 
+    // LOAD-BEARING: the spread passes `right` through UNCHANGED, so
+    // `adjustedMargin.left + plotWidth === width - margin.right` exactly. That
+    // identity is what lets `controlStackLeft` land the zoom controls at
+    // `width - CONTROL_SIZE` — flush with the chart's right edge — for any
+    // y-axis label width. Override `right:` here (say, for a right-hand y-axis)
+    // and the controls silently overhang the chart; nothing in the placement
+    // spec can catch it, because the spec cannot see this spread.
     const adjustedMargin = useMemo(
       () => ({
         ...margin,
@@ -839,27 +847,34 @@ const Chart: React.FC<ChartProps> = observer(
           <PointsOnMap chartItems={processedChartItems} />
           {zoomBounded && (
             <ChartZoomControls
-              /* RIGHT edge of the plot band (owner call, 2026-08-11).
+              /* The right MARGIN — clear of the plot band, so the stack
+               * occludes zero data (owner call, 2026-08-11).
                *
                * History worth keeping, because the right side is CONTESTED:
-               * these first sat in the right MARGIN and were invisible to a
-               * real mouse — the expert-review queue panel is `z-index: 10`
-               * across x 1548–1850 on al-shaheen, so the buttons rendered
-               * with a correct bounding box while `elementsFromPoint`
-               * returned the panel. A programmatic `.click()` still drove the
-               * zoom, which is exactly how that hides from any test not using
-               * a real pointer. They then moved left; the owner asked for
-               * right, larger.
+               * these first sat in the margin and were invisible to a real
+               * mouse — the expert-review queue panel is `z-index: 10` across
+               * x 1548–1850 on al-shaheen, so the buttons rendered with a
+               * correct bounding box while `elementsFromPoint` returned the
+               * panel. A programmatic `.click()` still drove the zoom, which
+               * is exactly how that hides from any test not using a real
+               * pointer. They then moved left; the owner asked for right,
+               * larger; they landed just INSIDE the band's right edge, which
+               * left one bar's tip underneath them (measured: 1 of 264).
                *
-               * They come back to the right because the OVERLAP was removed
-               * at its source: the host now sizes that panel to stop at the
-               * top of the dock, which also un-hid the newest bars it had
+               * They can sit in the margin now because the OVERLAP was
+               * removed at its source: the host sizes that panel to stop at
+               * the top of the dock, which also un-hid the newest bars it had
                * been covering. A z-index here could never have done it — the
                * dock is its own stacking context (see
                * `Z_ABOVE_CHART_CHILDREN`). Verify placement with
                * `elementsFromPoint`, never with `.click()`: a programmatic
                * click drives the zoom even when the button is buried. */
-              left={adjustedMargin.left + plotWidth - CONTROL_SIZE - 4}
+              left={controlStackLeft({
+                plotLeft: adjustedMargin.left,
+                plotWidth,
+                marginRight: adjustedMargin.right,
+                controlSize: CONTROL_SIZE
+              })}
               top={adjustedMargin.top + 4}
               hasDefaultWindow={!!defaultWindow}
               onZoomIn={() => zoomApiRef.current?.scaleBy(1.6)}
