@@ -57,8 +57,11 @@ describe("pickedFeatureDistance", function () {
 
   describe("dataZoomFor", function () {
     it("mirrors View.queryFeatures' own choice, including the maxDataLevel cap", function () {
-      expect(dataZoomFor(16, 1, 15)).toBe(15);
-      expect(dataZoomFor(16, 1, 20)).toBe(15);
+      // The cap must BIND in at least one case, or removing it changes nothing: at
+      // displayZoom 16 with levelDiff 1 the result is 15 whether or not maxDataLevel is
+      // applied, so a test built only from that pair passes with the cap deleted.
+      expect(dataZoomFor(20, 1, 15)).toBe(15); // cap binds: 19 -> 15
+      expect(dataZoomFor(16, 1, 20)).toBe(15); // cap does not bind
       expect(dataZoomFor(9.4, 1, 20)).toBe(8); // rounds the display zoom first
     });
   });
