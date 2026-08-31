@@ -6,10 +6,19 @@
  * position. So `pickFeatures`' first entry, which becomes `selectedFeature`, is an arbitrary
  * member of the returned set rather than the nearest one.
  *
- * On a dense point layer that is very visible: one click on an 11.3M-point PSI velocity layer
- * returned 1,247 features and opened the panel on one ~9.1 km from the cursor. The brush is 16
- * *data-tile pixels*, so the ground area it covers grows as you zoom out — kilometres at low
- * zoom is expected, and is exactly the case where "which one" matters.
+ * On a dense point layer that is very visible. MEASURED in real hardware-WebGL Chrome against
+ * the live 11.3M-point Doha PSI velocity layer, with the distances re-derived independently of
+ * this file: without the sort, 6 of 6 multi-feature picks returned a non-nearest feature first,
+ * worst case rank 26 of 31 — the panel opened on a point 499 m away while one sat 113 m from
+ * the cursor. With the sort, 9 of 9 came back rank 1 of N.
+ *
+ * The brush is 16 *data-tile pixels*, so the ground area it covers grows as you zoom out (2
+ * features at 16 km camera height, 10 at 60 km, 32 at 150 km) — hundreds of metres at low zoom
+ * is expected, and is exactly the case where "which one" matters.
+ *
+ * ERRATUM: an earlier draft cited "1,247 features ... ~9.1 km". That figure is NOT reproducible
+ * on this layer. Replaced by the measurement above, and recorded as wrong rather than quietly
+ * deleted, because it was quoted downstream too.
  *
  * WHY THE MATH IS DUPLICATED HERE, AND HOW THAT IS KEPT HONEST. protomaps-leaflet computes the
  * click's tile-local position inside `TileCache.queryFeatures`, using `project()` and `MAXCOORD`
