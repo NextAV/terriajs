@@ -2,6 +2,7 @@ import Point from "@mapbox/point-geometry";
 import { isEmpty } from "lodash-es";
 import { action, makeObservable } from "mobx";
 import {
+  GeomType,
   LabelRule,
   Labelers,
   LineSymbolizer,
@@ -33,6 +34,11 @@ import {
   GEOJSON_SOURCE_LAYER_NAME,
   ProtomapsGeojsonSource
 } from "../Vector/Protomaps/ProtomapsGeojsonSource";
+import {
+  dataZoomFor,
+  sortPickedByDistance,
+  tileLocalClickCenter
+} from "../Vector/pickedFeatureDistance";
 
 export const LAYER_NAME_PROP = "__LAYERNAME";
 
@@ -72,10 +78,7 @@ interface Options {
 }
 
 type Source =
-  | PmtilesSource
-  | ZxySource
-  | ProtomapsGeojsonSource
-  | ProtomapsArcGisPbfSource;
+  PmtilesSource | ZxySource | ProtomapsGeojsonSource | ProtomapsArcGisPbfSource;
 
 /** Tile size in pixels (for canvas and geojson-vt) */
 export const PROTOMAPS_DEFAULT_TILE_SIZE = 256;
@@ -366,36 +369,69 @@ export default class ProtomapsImageryProvider implements ImageryProviderWithGrid
         (r) => r.dataLayer
       );
 
-      this.view
-        .queryFeatures(
-          CesiumMath.toDegrees(longitude),
-          CesiumMath.toDegrees(latitude),
-          level,
-          FEATURE_PICK_BRUSH_SIZE
+      const lonDeg = CesiumMath.toDegrees(longitude);
+      const latDeg = CesiumMath.toDegrees(latitude);
+      const picked = this.view.queryFeatures(
+        lonDeg,
+        latDeg,
+        level,
+        FEATURE_PICK_BRUSH_SIZE
+      );
+
+      // NEAREST FIRST. `queryFeatures` returns everything inside the brush in iteration order
+      // and discards the distance it computed to decide membership, so the first entry -- which
+      // becomes `selectedFeature` -- was an arbitrary member of the set.
+      // Measured on the live Doha PSI layer: 6 of 6 multi-feature picks returned a non-nearest
+      // first, worst rank 26 of 31 (499 m away, with one at 113 m). See pickedFeatureDistance.ts.
+      //
+      // Reordering is safe to do unconditionally: nearest-first is not worse for any consumer,
+      // and it is a no-op wherever the pick returns 0 or 1 feature, which is the ordinary case
+      // on a sparse layer. `sortPickedByDistance` returns the ORIGINAL order whenever it cannot
+      // reproduce the library's own membership decision, so a disagreement costs the
+      // improvement rather than producing a confidently wrong order.
+      const ordered = sortPickedByDistance(
+        picked,
+        tileLocalClickCenter(
+          lonDeg,
+          latDeg,
+          dataZoomFor(level, this.view.levelDiff, this.view.maxDataLevel),
+          this.view.tileCache.tileSize
+        ),
+        // The brush the library actually applied at this zoom, not the constant: it divides by
+        // 2^(displayZoom - dataZoom) before testing, so comparing against the raw 16 would make
+        // the cross-check pass at any distance under overzoom.
+        FEATURE_PICK_BRUSH_SIZE /
+          (1 <<
+            (Math.round(level) -
+              dataZoomFor(level, this.view.levelDiff, this.view.maxDataLevel))),
+        GeomType.Point,
+        GeomType.Line,
+        GeomType.Polygon
+      );
+
+      ordered.forEach((f) => {
+        // Only create FeatureInfo for visible features with properties
+        if (
+          !f.feature.props ||
+          isEmpty(f.feature.props) ||
+          !renderedLayers.includes(f.layerName)
         )
-        .forEach((f) => {
-          // Only create FeatureInfo for visible features with properties
-          if (
-            !f.feature.props ||
-            isEmpty(f.feature.props) ||
-            !renderedLayers.includes(f.layerName)
-          )
-            return;
+          return;
 
-          const featureInfo = new ImageryLayerFeatureInfo();
+        const featureInfo = new ImageryLayerFeatureInfo();
 
-          // Add Layer name property
-          featureInfo.properties = Object.assign(
-            { [LAYER_NAME_PROP]: f.layerName },
-            f.feature.props ?? {}
-          );
-          featureInfo.position = new Cartographic(longitude, latitude);
+        // Add Layer name property
+        featureInfo.properties = Object.assign(
+          { [LAYER_NAME_PROP]: f.layerName },
+          f.feature.props ?? {}
+        );
+        featureInfo.position = new Cartographic(longitude, latitude);
 
-          featureInfo.configureDescriptionFromProperties(f.feature.props);
-          featureInfo.configureNameFromProperties(f.feature.props);
+        featureInfo.configureDescriptionFromProperties(f.feature.props);
+        featureInfo.configureNameFromProperties(f.feature.props);
 
-          featureInfos.push(featureInfo);
-        });
+        featureInfos.push(featureInfo);
+      });
 
       // No view is set and we have geoJSON object
       // So we pick features manually
