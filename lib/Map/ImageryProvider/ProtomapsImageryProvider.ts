@@ -380,8 +380,9 @@ export default class ProtomapsImageryProvider implements ImageryProviderWithGrid
 
       // NEAREST FIRST. `queryFeatures` returns everything inside the brush in iteration order
       // and discards the distance it computed to decide membership, so the first entry -- which
-      // becomes `selectedFeature` -- was an arbitrary member of the set. On a dense point layer
-      // one click returned 1,247 features and opened the panel on one ~9.1 km away.
+      // becomes `selectedFeature` -- was an arbitrary member of the set.
+      // Measured on the live Doha PSI layer: 6 of 6 multi-feature picks returned a non-nearest
+      // first, worst rank 26 of 31 (499 m away, with one at 113 m). See pickedFeatureDistance.ts.
       //
       // Reordering is safe to do unconditionally: nearest-first is not worse for any consumer,
       // and it is a no-op wherever the pick returns 0 or 1 feature, which is the ordinary case
