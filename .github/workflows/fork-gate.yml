@@ -1,0 +1,106 @@
+# A gate for THIS fork's own changes.
+#
+# Why a second workflow rather than relying on `ci.yml`: that file runs the
+# whole upstream suite, and on this fork it is not registered as a workflow at
+# all (a fork's workflows stay dormant until a human enables Actions in the
+# Actions tab -- there is no REST endpoint for it). So the fork that EVERY
+# tenant inherits on a lock re-pin has been the one repo in the estate with no
+# gate, while the consuming viewer bundles it through babel, which strips
+# types without checking them. A type error here would reach production
+# without anything failing.
+#
+# Scope is deliberate. Two anti-patterns to avoid, not one:
+#
+#   - a gate that cannot fire (checks nothing that would actually break), and
+#   - a gate that is permanently red (teaches everyone to skim past it).
+#
+# Measured on 2026-09-08 before writing this: `prettier --check .` fails on 7
+# pre-existing files, and `gulp test` fails 10 pre-existing specs -- all of
+# them Cesium 3D interaction (BoxDrawing, Cesium3DTilesCatalogItem) which need
+# real hardware WebGL and are unlikely to pass on a software-WebGL runner
+# either. Gating on those would be red from the first run.
+#
+# So: the BLOCKING job checks only what is clean today and catches the class
+# that would otherwise ship silently -- types, and formatting of the files
+# this change actually touches. The spec suite runs alongside as INFORMATION,
+# so its count and any NEW failure are visible without holding the gate.
+# Making the suite blocking is the follow-up, and it needs the 10 triaged
+# first.
+
+name: Fork gate
+
+on:
+  pull_request:
+  push:
+    branches: [wmts-time-bridge-8.12.2]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Types + formatting (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g yarn@^1.22.22 && yarn install --frozen-lockfile --ignore-scripts
+
+      # Types. The repo's own tsconfig pulls in a pre-existing error from
+      # node_modules/webpack/types.d.ts, so this asserts on errors in OUR
+      # source only -- specific enough to stay green today and to fail the
+      # moment lib/ or test/ stops compiling.
+      - name: TypeScript (lib/ and test/ must be clean)
+        run: |
+          set -uo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.json > tsc.log 2>&1 || true
+          if grep -E '^(lib|test)/' tsc.log; then
+            echo "::error::TypeScript errors in lib/ or test/"
+            exit 1
+          fi
+          echo "No TypeScript errors in lib/ or test/"
+
+      # Formatting, on the files this PR actually touches. Checking the whole
+      # repo would be red on 7 pre-existing files, and reformatting them in a
+      # FORK is churn that makes every future upstream merge harder.
+      - name: Prettier (changed files only)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -uo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE"...HEAD \
+            | grep -E '\.(ts|tsx|js|jsx|json|scss|md)$' || true)
+          if [ -z "$CHANGED" ]; then echo "No formattable files changed."; exit 0; fi
+          echo "$CHANGED"
+          echo "$CHANGED" | xargs ./node_modules/.bin/prettier --check
+
+  specs:
+    name: Spec suite (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g yarn@^1.22.22 && yarn install --frozen-lockfile
+      - name: Build specs and run them
+        run: |
+          ./node_modules/.bin/gulp build
+          ./node_modules/.bin/gulp test 2>&1 | tee spec.log
+      - name: Summarise
+        if: always()
+        run: |
+          tail -n 1 spec.log >> "$GITHUB_STEP_SUMMARY" || true
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline at b52a15b was 1651 specs / 10 failures (all Cesium 3D interaction)." \
+            >> "$GITHUB_STEP_SUMMARY"
