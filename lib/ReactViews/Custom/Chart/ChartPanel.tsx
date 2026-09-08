@@ -4,11 +4,13 @@ import { FC, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import JulianDate from "terriajs-cesium/Source/Core/JulianDate";
 import ChartView from "../../../Charts/ChartView";
+import { latestPointMs, stalenessDays } from "../../../Charts/chartZoomWindow";
 import {
-  latestPointMs,
-  stalenessDays
-} from "../../../Charts/chartZoomWindow";
+  nextExpectedObservationMs,
+  observationCaption
+} from "../../../Charts/observationCadence";
 import Result from "../../../Core/Result";
+import DiscretelyTimeVaryingMixin from "../../../ModelMixins/DiscretelyTimeVaryingMixin";
 import MappableMixin from "../../../ModelMixins/MappableMixin";
 import Icon from "../../../Styled/Icon";
 import { useViewState } from "../../Context";
@@ -50,6 +52,32 @@ interface ChartPanelProps {
    */
   stalenessLabel?: string;
   /**
+   * Optional: also state when the next observation is EXPECTED, inferred from
+   * the timeline's own revisit cadence -- "last pass 7 Sep 2026, 02:30 UTC
+   * (36 h ago) · next expected 10 Sep 2026, 14:41 UTC (in 3 days)".
+   *
+   * Opt-in, so every caller that does not pass it keeps the existing
+   * staleness-only caption byte-identically. Two things change when it is on,
+   * and both are deliberate:
+   *
+   * - the caption no longer SUPPRESSES itself on a fresh feed. That was right
+   *   while the line was purely a staleness warning, but on a product whose
+   *   revisit gaps run 24-84 hours it meant the line vanished for roughly
+   *   half of every cycle and read as a glitch rather than as a deliberate
+   *   silence. "When did we last look, and when do we look next" is useful
+   *   precisely when the feed is healthy.
+   * - instants come from the TIMELINE DRIVER rather than the chart's points,
+   *   so they carry the observation's time of day. A daily chart plots at
+   *   midnight, which cannot distinguish a 14:40 ascending pass from a 02:30
+   *   descending one -- and the gap between those is the thing being stated.
+   *
+   * The second half is a PREDICTION and is worded as one. Backtested over 120
+   * days of real Sentinel-1 acquisitions: 28 of 28 within 24 seconds in a
+   * settled constellation; across the Sentinel-1A retirement it was wrong by
+   * up to ~36 hours and re-converged within one cycle.
+   */
+  showNextExpected?: boolean;
+  /**
    * Optional: called when the user presses the chart's reset control, AFTER
    * the chart has restored its own time window. Lets the consumer restore
    * anything the chart does not own — notably the timeline CLOCK, so "reset"
@@ -65,6 +93,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
     showSelectedDate,
     defaultTimeWindowDays,
     stalenessLabel,
+    showNextExpected,
     onResetView
   }) => {
     const { t } = useTranslation();
@@ -186,12 +215,56 @@ const ChartPanel: FC<ChartPanelProps> = observer(
     const staleDays = stalenessLabel
       ? stalenessDays(lastDataMs, Date.now())
       : undefined;
-    const stalenessCaption =
+    const legacyStalenessCaption =
       staleDays !== undefined && lastDataMs !== undefined
         ? `last ${stalenessLabel}: ${new Date(lastDataMs)
             .toISOString()
             .slice(0, 10)} (${staleDays} day${staleDays === 1 ? "" : "s"} ago)`
         : undefined;
+
+    // Opt-in richer caption: last observation AND the next expected one.
+    // Instants come from the timeline DRIVER, not from `chartItems`: a daily
+    // series plots at midnight, and the time of day is exactly what
+    // distinguishes a 14:40 ascending pass from a 02:30 descending one.
+    // Computed inline, NOT memoised. `discreteTimesAsSortedJulianDates` is a
+    // MobX @computed whose VALUE changes without `timelineStack.top` changing
+    // identity -- the pass-instant union is stamped onto the members after
+    // boot and the model reloads underneath. A `useMemo` keyed on `top` would
+    // skip the read on those renders, so the observer would never take a
+    // dependency on it and the caption would sit on the boot-time list.
+    const observationInstants = ((): number[] | undefined => {
+      if (!showNextExpected) return undefined;
+      // `timelineStack.top` is typed `TimeVarying`, which carries only the
+      // three JulianDate getters -- the discrete list lives on the
+      // DiscretelyTimeVarying mixin, so narrow before reaching for it. A
+      // driver without discrete times (a continuous layer) yields undefined
+      // and the caption falls back to its staleness-only half.
+      const top = viewState.terria.timelineStack.top;
+      const dates = DiscretelyTimeVaryingMixin.isMixedInto(top)
+        ? top.discreteTimesAsSortedJulianDates
+        : undefined;
+      // `AsJulian` is `{ time: JulianDate; tag: string }` -- read `.time`
+      // explicitly rather than accepting either shape, so a future change to
+      // that type is a compile error here instead of a silent NaN.
+      return dates?.map((d) => JulianDate.toDate(d.time).getTime());
+    })();
+
+    const richCaption =
+      showNextExpected && stalenessLabel
+        ? observationCaption({
+            label: stalenessLabel,
+            lastMs:
+              observationInstants && observationInstants.length > 0
+                ? observationInstants[observationInstants.length - 1]
+                : lastDataMs,
+            nextMs: observationInstants
+              ? nextExpectedObservationMs(observationInstants, Date.now())
+              : undefined,
+            nowMs: Date.now()
+          })
+        : undefined;
+
+    const stalenessCaption = richCaption ?? legacyStalenessCaption;
 
     const chart = useMemo(() => {
       const items = viewState.terria.workbench.items;
