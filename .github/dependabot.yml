@@ -4,4 +4,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    target-branch: "main"
+    # No `target-branch`: version updates then follow the DEFAULT branch, which
+    # is now this trunk. It previously pinned "main" -- the stale upstream
+    # mirror, 3,340 commits behind and consumed by nothing -- so every Actions
+    # update landed where it could never ship.
+    #
+    # Deliberately github-actions ONLY. There is no npm entry, so Dependabot
+    # raises no npm VERSION updates here; the npm PRs on this repo are
+    # SECURITY updates, which need no config and always target the default
+    # branch. That split is the point: on a pinned vendor fork, version churn
+    # is noise and advisories are the signal, and we want exactly one of them.
