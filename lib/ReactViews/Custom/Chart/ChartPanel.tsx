@@ -266,6 +266,21 @@ const ChartPanel: FC<ChartPanelProps> = observer(
 
     const stalenessCaption = richCaption ?? legacyStalenessCaption;
 
+    // The tooltip has to describe whichever caption is showing. The static
+    // text below was written for the staleness-only line and says nothing
+    // about a predicted date -- leaving it in place would put an inferred
+    // instant on screen with an explanation that does not mention it is
+    // inferred, which is the half of the honesty contract this caption is
+    // supposed to serve.
+    const captionTitle = richCaption
+      ? "The newest observation, and when the next one is expected. The " +
+        "expected time is INFERRED from this feed's own revisit cadence: it " +
+        "is a projection, not a schedule, and can be off while the satellite " +
+        "constellation is changing. The view is anchored to the data, not to " +
+        "the current date."
+      : "The newest observation in this chart. The view is anchored to the " +
+        "data, not to the current date.";
+
     const chart = useMemo(() => {
       const items = viewState.terria.workbench.items;
       if (items.length === 0) return;
@@ -354,7 +369,7 @@ const ChartPanel: FC<ChartPanelProps> = observer(
                         fontWeight: 400,
                         opacity: 0.75
                       }}
-                      title="The newest observation in this chart. The view is anchored to the data, not to the current date."
+                      title={captionTitle}
                     >
                       {stalenessCaption}
                     </span>
