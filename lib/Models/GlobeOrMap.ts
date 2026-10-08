@@ -16,6 +16,10 @@ import LatLonHeight from "../Core/LatLonHeight";
 import TerriaError from "../Core/TerriaError";
 import ProtomapsImageryProvider from "../Map/ImageryProvider/ProtomapsImageryProvider";
 import featureDataToGeoJson from "../Map/PickedFeatures/featureDataToGeoJson";
+import {
+  polygonHierarchyRings,
+  resolveOutlineStyle
+} from "../Map/Vector/polygonOutlineHighlight";
 import { ProviderCoordsMap } from "../Map/PickedFeatures/PickedFeatures";
 import MappableMixin from "../ModelMixins/MappableMixin";
 import TimeVarying from "../ModelMixins/TimeVarying";
@@ -218,6 +222,45 @@ export default abstract class GlobeOrMap {
     rectangle: Rectangle
   ): () => void;
 
+  /**
+   * NextAV: draw a selection outline along `rings` (open rings of Cartesian3,
+   * outer first). Returns the function that removes it, or undefined when this
+   * viewer cannot draw it, in which case the caller falls back to the stock
+   * polygon highlight. The outline must not be pickable: a click on it would
+   * otherwise select a feature with no properties.
+   */
+  abstract _addPolygonOutlineHighlight(
+    rings: Cartesian3[][],
+    color: Color,
+    widthPx: number
+  ): (() => void) | undefined;
+
+  /**
+   * The remover for an outline highlight of `feature`'s polygon, or undefined
+   * when the outline style is off, the feature has no drawable polygon, or the
+   * viewer cannot draw it. Never touches the polygon itself, so its own fill
+   * and outline stay as the layer styled them.
+   */
+  private _polygonOutlineHighlight(
+    feature: TerriaFeature
+  ): (() => void) | undefined {
+    const style = resolveOutlineStyle(this.terria.polygonSelectionHighlight);
+    if (!style) return undefined;
+    const polygon = (feature.cesiumEntity ?? feature).polygon;
+    if (!isDefined(polygon) || !isDefined(polygon.hierarchy)) return undefined;
+    let rings: Cartesian3[][];
+    try {
+      rings = polygonHierarchyRings(
+        polygon.hierarchy.getValue(this.terria.timelineClock.currentTime)
+      );
+    } catch (err) {
+      TerriaError.from(err).log();
+      return undefined;
+    }
+    if (rings.length === 0) return undefined;
+    return this._addPolygonOutlineHighlight(rings, style.color, style.width);
+  }
+
   async _highlightFeature(feature: TerriaFeature | undefined): Promise<void> {
     if (isDefined(this._removeHighlightCallback)) {
       await this._removeHighlightCallback();
@@ -231,6 +274,7 @@ export default abstract class GlobeOrMap {
 
     if (isDefined(feature)) {
       let hasGeometry = false;
+      let outlineRemover: (() => void) | undefined;
 
       if (isDefined(feature._cesium3DTileFeature)) {
         const originalColor = feature._cesium3DTileFeature.color;
@@ -270,6 +314,12 @@ export default abstract class GlobeOrMap {
             }
           }
         };
+      } else if (
+        isDefined(feature.polygon) &&
+        isDefined((outlineRemover = this._polygonOutlineHighlight(feature)))
+      ) {
+        hasGeometry = true;
+        this._removeHighlightCallback = outlineRemover;
       } else if (
         isDefined(feature.polygon) &&
         // Skip the gray polygon-fill highlight for a pick-only contour fill (GeojsonMixin flags these when it

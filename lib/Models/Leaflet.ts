@@ -14,6 +14,7 @@ import Cartesian2 from "terriajs-cesium/Source/Core/Cartesian2";
 import Cartesian3 from "terriajs-cesium/Source/Core/Cartesian3";
 import Cartographic from "terriajs-cesium/Source/Core/Cartographic";
 import Clock from "terriajs-cesium/Source/Core/Clock";
+import Color from "terriajs-cesium/Source/Core/Color";
 import Ellipsoid from "terriajs-cesium/Source/Core/Ellipsoid";
 import EventHelper from "terriajs-cesium/Source/Core/EventHelper";
 import CesiumMath from "terriajs-cesium/Source/Core/Math";
@@ -1122,6 +1123,36 @@ export default class Leaflet extends GlobeOrMap {
 
     return function () {
       map.removeLayer(layer);
+    };
+  }
+
+  _addPolygonOutlineHighlight(
+    rings: Cartesian3[][],
+    color: Color,
+    widthPx: number
+  ): (() => void) | undefined {
+    const latLngRings = rings.map((ring) =>
+      ring.map((position) => {
+        const carto = Ellipsoid.WGS84.cartesianToCartographic(position);
+        return L.latLng(
+          CesiumMath.toDegrees(carto.latitude),
+          CesiumMath.toDegrees(carto.longitude)
+        );
+      })
+    );
+    const map = this.map;
+    const outline = L.polygon(latLngRings, {
+      color: color.toCssColorString(),
+      opacity: color.alpha,
+      weight: widthPx,
+      fill: false,
+      interactive: false
+    });
+    outline.addTo(map);
+    outline.bringToFront();
+
+    return function () {
+      map.removeLayer(outline);
     };
   }
 }

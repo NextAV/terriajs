@@ -1,3 +1,5 @@
+import Cartesian3 from "terriajs-cesium/Source/Core/Cartesian3";
+import Color from "terriajs-cesium/Source/Core/Color";
 import Rectangle from "terriajs-cesium/Source/Core/Rectangle";
 import LatLonHeight from "../Core/LatLonHeight";
 import ProtomapsImageryProvider from "../Map/ImageryProvider/ProtomapsImageryProvider";
@@ -63,6 +65,14 @@ class NoViewer extends GlobeOrMap {
     _rectangle: Rectangle
   ) {
     return () => {};
+  }
+
+  _addPolygonOutlineHighlight(
+    _rings: Cartesian3[][],
+    _color: Color,
+    _widthPx: number
+  ): (() => void) | undefined {
+    return undefined;
   }
 }
 
