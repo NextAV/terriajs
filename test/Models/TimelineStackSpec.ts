@@ -47,6 +47,18 @@ describe("TimelineStack", function () {
     expect(terria.timelineStack.top).toBe(wms);
   });
 
+  it(" - removing an item that is not in the stack leaves the stack alone", async function () {
+    const outside = new WebMapServiceCatalogItem("outside", terria);
+    terria.addModel(outside);
+    outside.setTrait("definition", "url", "test/WMS/comma_sep_datetimes.xml");
+    await outside.loadMapItems();
+
+    terria.timelineStack.remove(outside);
+
+    expect(terria.timelineStack.items.length).toBe(1);
+    expect(terria.timelineStack.contains(wms)).toBe(true);
+  });
+
   it("automatically syncs the clock with the top item", async function () {
     const wms2 = new WebMapServiceCatalogItem("test2", terria);
     terria.addModel(wms2);
