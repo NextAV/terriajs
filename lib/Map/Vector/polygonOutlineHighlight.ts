@@ -1,5 +1,6 @@
 import Cartesian3 from "terriajs-cesium/Source/Core/Cartesian3";
 import Color from "terriajs-cesium/Source/Core/Color";
+import CesiumMath from "terriajs-cesium/Source/Core/Math";
 import PolygonHierarchy from "terriajs-cesium/Source/Core/PolygonHierarchy";
 
 /**
@@ -57,22 +58,41 @@ export function resolveOutlineStyle(
 
 /**
  * Every ring of a polygon hierarchy, outer ring first, then holes depth-first.
- * A ring with fewer than two positions cannot be drawn as a line and is
- * dropped. Rings are returned open; the viewer closes them.
+ *
+ * Rings are returned OPEN and free of consecutive duplicates: a GeoJSON ring
+ * repeats its first position at the end, and a looped ground polyline over
+ * that builds a zero-length closing segment whose normal is NaN, which stops
+ * Cesium rendering altogether. A ring left with fewer than two distinct
+ * positions cannot be drawn as a line and is dropped.
  */
 export function polygonHierarchyRings(
   hierarchy: PolygonHierarchy | Cartesian3[] | undefined
 ): Cartesian3[][] {
   if (!hierarchy) return [];
+  const same = (a: Cartesian3, b: Cartesian3) =>
+    Cartesian3.equalsEpsilon(a, b, CesiumMath.EPSILON10);
+  const open = (positions: Cartesian3[] | undefined) => {
+    if (!Array.isArray(positions)) return undefined;
+    const ring: Cartesian3[] = [];
+    for (const p of positions) {
+      if (p && (ring.length === 0 || !same(ring[ring.length - 1], p))) {
+        ring.push(p);
+      }
+    }
+    while (ring.length > 1 && same(ring[0], ring[ring.length - 1])) {
+      ring.pop();
+    }
+    return ring.length >= 2 ? ring : undefined;
+  };
   if (Array.isArray(hierarchy)) {
-    return hierarchy.length >= 2 ? [hierarchy] : [];
+    const ring = open(hierarchy);
+    return ring ? [ring] : [];
   }
   const rings: Cartesian3[][] = [];
   const visit = (h: PolygonHierarchy | undefined) => {
     if (!h) return;
-    if (Array.isArray(h.positions) && h.positions.length >= 2) {
-      rings.push(h.positions);
-    }
+    const ring = open(h.positions);
+    if (ring) rings.push(ring);
     if (Array.isArray(h.holes)) h.holes.forEach(visit);
   };
   visit(hierarchy);

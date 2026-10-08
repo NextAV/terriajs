@@ -64,9 +64,28 @@ describe("polygonOutlineHighlight", function () {
         ])
       );
       expect(rings.length).toBe(3);
-      expect(rings[0]).toBe(outer);
-      expect(rings[1]).toBe(hole);
-      expect(rings[2]).toBe(islandInHole);
+      expect(rings[0]).toEqual(outer);
+      expect(rings[1]).toEqual(hole);
+      expect(rings[2]).toEqual(islandInHole);
+    });
+
+    it("opens a closed GeoJSON ring and drops repeated positions", function () {
+      // GeoJSON repeats the first position at the end. Looped as-is, the
+      // closing segment has zero length and Cesium stops rendering.
+      const closed = [...outer, outer[0]];
+      const stuttered = [outer[0], outer[1], outer[1], outer[2], outer[3]];
+      const rings = polygonHierarchyRings(
+        new PolygonHierarchy(closed, [new PolygonHierarchy(stuttered)])
+      );
+      expect(rings.length).toBe(2);
+      expect(rings[0].length).toBe(outer.length);
+      expect(rings[1].length).toBe(4);
+      for (const ring of rings) {
+        for (let i = 0; i < ring.length; i++) {
+          const next = ring[(i + 1) % ring.length];
+          expect(Cartesian3.equals(ring[i], next)).toBe(false);
+        }
+      }
     });
 
     it("accepts a bare position array", function () {
