@@ -123,3 +123,89 @@ export function columnForInstant(
   }
   return best;
 }
+
+/**
+ * Where a click on a bar sends the timeline.
+ *
+ * Two regimes, chosen by whether the data DECLARES the bar's period.
+ *
+ * INFERRED (no declared period, every chart before this existed): the period is
+ * `[clickMs, clickMs + spanMs)` with `spanMs` measured from the series' own
+ * smallest gap, and a period holding no instant falls back to the NEAREST
+ * instant. That fallback is the frame-safety valve described at the top of this
+ * file, and this branch is the previous inline logic moved here unchanged.
+ *
+ * DECLARED (`periodEndMs` given): the bar stands for `[periodStartMs, periodEndMs)`
+ * exactly as the data says — `periodStartMs` defaults to `clickMs` — so a
+ * calendar half-month of 13, 15 or 16 days is contained exactly instead of by
+ * the smallest gap. A declared period with no instant inside it resolves to
+ * `emptyPeriod`, never to the nearest instant: the nearest may be weeks away,
+ * and landing there would show a picture from another period under a click on
+ * this one. The caller says so instead of moving the clock.
+ *
+ * A declared period that is not a period (non-finite, or end <= start) is
+ * treated as undeclared, so a malformed row degrades to the old behaviour
+ * rather than to a dead bar.
+ */
+export type BarClickResolution =
+  | { kind: "instant"; instantMs: number }
+  | { kind: "emptyPeriod"; periodStartMs: number; periodEndMs: number }
+  | { kind: "none" };
+
+export function resolveBarClick(
+  clickMs: number,
+  instantsMs: readonly number[],
+  options: { spanMs: number; periodStartMs?: number; periodEndMs?: number }
+): BarClickResolution {
+  if (!Number.isFinite(clickMs)) return { kind: "none" };
+  const start = Number.isFinite(options.periodStartMs)
+    ? (options.periodStartMs as number)
+    : clickMs;
+  const end = options.periodEndMs;
+  if (end !== undefined && Number.isFinite(end) && end > start) {
+    const inside = instantForColumn(start, instantsMs, end - start);
+    return inside === undefined
+      ? { kind: "emptyPeriod", periodStartMs: start, periodEndMs: end }
+      : { kind: "instant", instantMs: inside };
+  }
+  const contained = instantForColumn(clickMs, instantsMs, options.spanMs);
+  if (contained !== undefined) return { kind: "instant", instantMs: contained };
+  let best: number | undefined;
+  let bestDiff = Infinity;
+  for (const t of instantsMs) {
+    if (!Number.isFinite(t)) continue;
+    const diff = Math.abs(t - clickMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = t;
+    }
+  }
+  return best === undefined
+    ? { kind: "none" }
+    : { kind: "instant", instantMs: best };
+}
+
+/**
+ * The sentence shown when a click lands on a declared period with no instant in
+ * it. Every part is read from the data: the timeline driver's own name, the
+ * period's own label (or its declared bounds), and the date the map is on.
+ */
+export function emptyPeriodNotice(args: {
+  driverName?: string;
+  periodLabel?: string;
+  periodStartMs: number;
+  periodEndMs: number;
+  currentMs?: number;
+}): string {
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const what = args.driverName ? `“${args.driverName}” date` : "date";
+  const where =
+    args.periodLabel && args.periodLabel.trim()
+      ? args.periodLabel.trim()
+      : `${day(args.periodStartMs)} up to ${day(args.periodEndMs)}`;
+  const stays =
+    args.currentMs !== undefined && Number.isFinite(args.currentMs)
+      ? `; the map stays on ${day(args.currentMs)}`
+      : "; the map is unchanged";
+  return `No ${what} in ${where}${stays}.`;
+}

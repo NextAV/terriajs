@@ -1,3 +1,4 @@
+import type { ChartPoint as DeclaredChartPoint } from "../Charts/ChartData";
 import { maxBy, minBy } from "lodash-es";
 import AbstractConstructor from "../Core/AbstractConstructor";
 import LatLonHeight from "../Core/LatLonHeight";
@@ -42,7 +43,14 @@ export type ChartItemType =
   | "momentPoints"
   | "lineAndPoint";
 
-export interface ChartPoint {
+/**
+ * The optional per-row fields a table chart may declare (period, tooltip title
+ * and rows) travel on the point; see `ChartPoint` in `Charts/ChartData`.
+ */
+export interface ChartPoint extends Pick<
+  DeclaredChartPoint,
+  "periodStartMs" | "periodEndMs" | "tooltipTitle" | "tooltipRows"
+> {
   x: number | Date;
   y: number;
   isSelected?: boolean;

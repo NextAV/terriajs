@@ -13,8 +13,12 @@ import JulianDate from "terriajs-cesium/Source/Core/JulianDate";
 import CustomDataSource from "terriajs-cesium/Source/DataSources/CustomDataSource";
 import DataSource from "terriajs-cesium/Source/DataSources/DataSource";
 import ImageryProvider from "terriajs-cesium/Source/Scene/ImageryProvider";
-import { columnSpanMs, instantForColumn } from "../Charts/barColumnSnap";
-import { ChartPoint } from "../Charts/ChartData";
+import {
+  columnSpanMs,
+  emptyPeriodNotice,
+  resolveBarClick
+} from "../Charts/barColumnSnap";
+import { ChartPoint, ChartTooltipRow } from "../Charts/ChartData";
 import getChartColorForId from "../Charts/getChartColorForId";
 import AbstractConstructor from "../Core/AbstractConstructor";
 import { JsonObject } from "../Core/Json";
@@ -382,6 +386,58 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
         units: xColumn.units
       };
 
+      // Opt-in per-row extras (`chartPeriod*Column`, `chartTooltip*`). Each is
+      // undefined unless its trait names a column that exists, so a chart that
+      // sets none of them builds exactly the points it built before.
+      const timesOf = (name: string | undefined) => {
+        const column = name ? this.findColumnByName(name) : undefined;
+        return column ? column.valuesAsDates.values : undefined;
+      };
+      const periodEnds = timesOf(this.chartPeriodEndColumn);
+      const periodStarts = periodEnds
+        ? timesOf(this.chartPeriodStartColumn)
+        : undefined;
+      const titleColumn = this.chartTooltipTitleColumn
+        ? this.findColumnByName(this.chartTooltipTitleColumn)
+        : undefined;
+      const tooltipColumns = filterOutUndefined(
+        (this.chartTooltipColumns ?? []).map((name) =>
+          this.findColumnByName(name)
+        )
+      );
+      const rowExtras = (i: number) => {
+        const extras: {
+          periodStartMs?: number;
+          periodEndMs?: number;
+          tooltipTitle?: string;
+          tooltipRows?: ChartTooltipRow[];
+        } = {};
+        const end = periodEnds?.[i];
+        if (end) {
+          extras.periodEndMs = end.getTime();
+          const start = periodStarts?.[i];
+          if (start) extras.periodStartMs = start.getTime();
+        }
+        const title = titleColumn?.values[i];
+        if (title && title.trim()) extras.tooltipTitle = title.trim();
+        if (tooltipColumns.length > 0) {
+          const rows = filterOutUndefined(
+            tooltipColumns.map((column): ChartTooltipRow | undefined => {
+              const value = (column.values[i] ?? "").trim();
+              return value
+                ? {
+                    name: column.title || column.name,
+                    value,
+                    units: column.units
+                  }
+                : undefined;
+            })
+          );
+          if (rows.length > 0) extras.tooltipRows = rows;
+        }
+        return extras;
+      };
+
       return filterOutUndefined(
         lines.map((line) => {
           const yColumnId = line.yAxisColumn;
@@ -398,7 +454,7 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
             if (x === null || y === null) {
               continue;
             }
-            points.push({ x, y });
+            points.push({ x, y, ...rowExtras(i) });
           }
 
           if (points.length <= 1) return;
@@ -478,40 +534,55 @@ function TableMixin<T extends AbstractConstructor<BaseType>>(Base: T) {
                       // falls in its second half resolves to the PREVIOUS
                       // period's observation. Measured on the al-Shaheen S1
                       // archive that was 56 of 228 daily bars (25%) selecting
-                      // the wrong day. See lib/Charts/barColumnSnap.ts.
+                      // the wrong day. See lib/Charts/barColumnSnap.ts, which
+                      // also holds the nearest fallback for a period with no
+                      // instant, and the DECLARED-period regime that refuses it.
                       const spanMs = columnSpanMs(
                         points.map((p) =>
                           p.x instanceof Date ? p.x.getTime() : Number(p.x)
                         )
                       );
-                      const containedMs = instantForColumn(
-                        clickMs,
-                        instantsMs,
-                        spanMs
-                      );
-                      let target: JulianDate | undefined;
-                      if (containedMs !== undefined) {
-                        target =
-                          discretes[instantsMs.indexOf(containedMs)]?.time;
+                      const clicked = point as Partial<ChartPoint>;
+                      const resolved = resolveBarClick(clickMs, instantsMs, {
+                        spanMs,
+                        periodStartMs: clicked.periodStartMs,
+                        periodEndMs: clicked.periodEndMs
+                      });
+                      if (resolved.kind === "emptyPeriod") {
+                        // Say so instead of moving the clock: the nearest
+                        // instant lies outside the period this bar stands for.
+                        // Read from the DRIVER, the same source ChartPanel
+                        // compares against to decide whether the timeline has
+                        // moved on; the Cesium clock carries sub-second time
+                        // the driver's (second-precision) trait does not.
+                        const nowJd = (
+                          driver as
+                            | { currentTimeAsJulianDate?: JulianDate }
+                            | undefined
+                        )?.currentTimeAsJulianDate;
+                        const currentMs = nowJd
+                          ? JulianDate.toDate(nowJd).getTime()
+                          : undefined;
+                        this.terria.setBottomChartNotice({
+                          message: emptyPeriodNotice({
+                            driverName: (
+                              driver as { name?: string } | undefined
+                            )?.name,
+                            periodLabel: clicked.tooltipTitle,
+                            periodStartMs: resolved.periodStartMs,
+                            periodEndMs: resolved.periodEndMs,
+                            currentMs
+                          }),
+                          atMs: currentMs
+                        });
+                        return;
                       }
-                      // Fall back to nearest when this bar's period holds no
-                      // instant — a real state (a period the timeline has no
-                      // instant for), and the frame-safety valve: a chart whose
-                      // x values are not period starts in a frame at or behind
-                      // the instants' matches nothing and keeps the previous
-                      // behaviour rather than going dead.
-                      if (!target) {
-                        let bestDiff = Infinity;
-                        for (const d of discretes) {
-                          const diff = Math.abs(
-                            JulianDate.toDate(d.time).getTime() - clickMs
-                          );
-                          if (diff < bestDiff) {
-                            bestDiff = diff;
-                            target = d.time;
-                          }
-                        }
-                      }
+                      this.terria.setBottomChartNotice(undefined);
+                      const target: JulianDate | undefined =
+                        resolved.kind === "instant"
+                          ? discretes[instantsMs.indexOf(resolved.instantMs)]
+                              ?.time
+                          : undefined;
                       if (target && this.terria.timelineClock) {
                         this.terria.timelineClock.currentTime = target;
                         this.terria.timelineClock.shouldAnimate = false;
