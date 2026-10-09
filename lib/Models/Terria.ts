@@ -61,6 +61,7 @@ import PickedFeatures, {
   featureBelongsToCatalogItem,
   isProviderCoordsMap
 } from "../Map/PickedFeatures/PickedFeatures";
+import { PolygonSelectionHighlight } from "../Map/Vector/polygonOutlineHighlight";
 import CatalogMemberMixin, { getName } from "../ModelMixins/CatalogMemberMixin";
 import GroupMixin from "../ModelMixins/GroupMixin";
 import MappableMixin, { isDataSource } from "../ModelMixins/MappableMixin";
@@ -617,6 +618,13 @@ export default class Terria {
 
   @observable
   allowFeatureInfoRequests: boolean = true;
+
+  /**
+   * NextAV: how a selected polygon entity is highlighted. Undefined keeps the
+   * stock translucent fill. Set by the embedding app, not by a catalogue item.
+   * See `polygonOutlineHighlight.ts`.
+   */
+  polygonSelectionHighlight: PolygonSelectionHighlight | undefined = undefined;
 
   /**
    * Gets or sets the stack of map interactions modes.  The mode at the top of the stack

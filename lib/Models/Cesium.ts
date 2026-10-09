@@ -17,6 +17,8 @@ import AssociativeArray from "terriajs-cesium/Source/Core/AssociativeArray";
 import BoundingSphere from "terriajs-cesium/Source/Core/BoundingSphere";
 import Cartesian2 from "terriajs-cesium/Source/Core/Cartesian2";
 import Cartesian3 from "terriajs-cesium/Source/Core/Cartesian3";
+import Color from "terriajs-cesium/Source/Core/Color";
+import ColorGeometryInstanceAttribute from "terriajs-cesium/Source/Core/ColorGeometryInstanceAttribute";
 import Cartographic from "terriajs-cesium/Source/Core/Cartographic";
 import CesiumTerrainProvider from "terriajs-cesium/Source/Core/CesiumTerrainProvider";
 import createWorldTerrainAsync from "terriajs-cesium/Source/Core/createWorldTerrainAsync";
@@ -28,6 +30,8 @@ import EllipsoidTerrainProvider from "terriajs-cesium/Source/Core/EllipsoidTerra
 import Event from "terriajs-cesium/Source/Core/Event";
 import EventHelper from "terriajs-cesium/Source/Core/EventHelper";
 import FeatureDetection from "terriajs-cesium/Source/Core/FeatureDetection";
+import GeometryInstance from "terriajs-cesium/Source/Core/GeometryInstance";
+import GroundPolylineGeometry from "terriajs-cesium/Source/Core/GroundPolylineGeometry";
 import HeadingPitchRange from "terriajs-cesium/Source/Core/HeadingPitchRange";
 import Ion from "terriajs-cesium/Source/Core/Ion";
 import IonResource from "terriajs-cesium/Source/Core/IonResource";
@@ -50,11 +54,13 @@ import getElement from "terriajs-cesium/Source/DataSources/getElement";
 import Camera from "terriajs-cesium/Source/Scene/Camera";
 import Cesium3DTileset from "terriajs-cesium/Source/Scene/Cesium3DTileset";
 import CreditDisplay from "terriajs-cesium/Source/Scene/CreditDisplay";
+import GroundPolylinePrimitive from "terriajs-cesium/Source/Scene/GroundPolylinePrimitive";
 import I3SDataProvider from "terriajs-cesium/Source/Scene/I3SDataProvider";
 import ImageryLayer from "terriajs-cesium/Source/Scene/ImageryLayer";
 import ImageryLayerCollection from "terriajs-cesium/Source/Scene/ImageryLayerCollection";
 import ImageryLayerFeatureInfo from "terriajs-cesium/Source/Scene/ImageryLayerFeatureInfo";
 import ImageryProvider from "terriajs-cesium/Source/Scene/ImageryProvider";
+import PolylineColorAppearance from "terriajs-cesium/Source/Scene/PolylineColorAppearance";
 import PrimitiveCollection from "terriajs-cesium/Source/Scene/PrimitiveCollection";
 import Scene from "terriajs-cesium/Source/Scene/Scene";
 import SceneTransforms from "terriajs-cesium/Source/Scene/SceneTransforms";
@@ -1816,6 +1822,44 @@ export default class Cesium extends GlobeOrMap {
 
     return function () {
       scene.imageryLayers.remove(result);
+    };
+  }
+
+  _addPolygonOutlineHighlight(
+    rings: Cartesian3[][],
+    color: Color,
+    widthPx: number
+  ): (() => void) | undefined {
+    if (!this.supportsPolylinesOnTerrain) return undefined;
+    const scene = this.scene;
+    // Added after the data-source display's ground collections, so it draws
+    // over the selected polygon's own fill. allowPicking: false keeps a click
+    // on the line from selecting the outline instead of the feature.
+    const primitive = new GroundPolylinePrimitive({
+      geometryInstances: rings.map(
+        (positions) =>
+          new GeometryInstance({
+            geometry: new GroundPolylineGeometry({
+              positions,
+              width: widthPx,
+              loop: true
+            }),
+            attributes: {
+              color: ColorGeometryInstanceAttribute.fromColor(color)
+            }
+          })
+      ),
+      appearance: new PolylineColorAppearance(),
+      allowPicking: false
+    });
+    scene.groundPrimitives.add(primitive);
+    this.notifyRepaintRequired();
+
+    return () => {
+      if (!scene.isDestroyed()) {
+        scene.groundPrimitives.remove(primitive);
+        this.notifyRepaintRequired();
+      }
     };
   }
 }

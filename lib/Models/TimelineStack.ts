@@ -164,6 +164,10 @@ export default class TimelineStack {
   @action
   remove(item: TimeVarying): void {
     const index = this.items.indexOf(item);
+    // NextAV: an item that is not in the stack is a no-op. `splice(-1, 1)`
+    // removed the LAST layer instead, and the workbench's remove button calls
+    // this for every time-varying item, in the stack or not.
+    if (index < 0) return;
     this.items.splice(index, 1);
   }
 
