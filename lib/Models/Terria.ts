@@ -713,6 +713,25 @@ export default class Terria {
     this.bottomChartActiveXDomain = domain;
   }
 
+  /**
+   * A sentence the bottom-dock chart panel shows after a bar click that could
+   * not move the timeline: the bar DECLARES its period (`chartPeriodEndColumn`)
+   * and the timeline has no date inside it. `atMs` is the timeline time when it
+   * was posted; the panel shows it only while the timeline is still there, so
+   * it disappears as soon as the user moves to another date. Written by
+   * `TableMixin`'s bar click; UI-transient; `.ref`.
+   */
+  @observable.ref
+  bottomChartNotice: { message: string; atMs: number | undefined } | undefined =
+    undefined;
+
+  @action
+  setBottomChartNotice(
+    notice: { message: string; atMs: number | undefined } | undefined
+  ) {
+    this.bottomChartNotice = notice;
+  }
+
   /** Gets or sets the active SelectableDimensionWorkflow, if defined, then the workflow will be displayed using `WorkflowPanel` */
   @observable
   selectableDimensionWorkflow?: SelectableDimensionWorkflow;
