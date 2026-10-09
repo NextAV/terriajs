@@ -4,6 +4,7 @@ import {
   columnSpanMs,
   emptyPeriodNotice,
   instantForColumn,
+  markerColumnForInstant,
   resolveBarClick
 } from "../../lib/Charts/barColumnSnap";
 
@@ -223,6 +224,79 @@ describe("barColumnSnap", function () {
           })
         ).toEqual({ kind: "instant", instantMs: frames[0] });
       });
+    });
+  });
+
+  describe("markerColumnForInstant", function () {
+    // Half-month bars: x at the period start, the period declared per bar.
+    const half = (start: string, end: string) => ({
+      xMs: bar(start),
+      periodStartMs: bar(start),
+      periodEndMs: bar(end)
+    });
+    const halfMonths = [
+      half("2026-01-01", "2026-01-16"),
+      half("2026-01-16", "2026-02-01"),
+      half("2026-02-01", "2026-02-16"),
+      half("2026-02-16", "2026-03-01")
+    ];
+    const span = columnSpanMs(halfMonths.map((b) => b.xMs)); // 13 days
+
+    it("puts a day-31 frame on its own 16-day half-month, as the click does", function () {
+      const lateJan = ms("2026-01-31T07:22:00Z");
+      expect(markerColumnForInstant(lateJan, halfMonths, span)).toBe(
+        bar("2026-01-16")
+      );
+      // The click on that bar selects the same frame: the two agree.
+      expect(
+        resolveBarClick(bar("2026-01-16"), [lateJan], {
+          spanMs: span,
+          periodStartMs: bar("2026-01-16"),
+          periodEndMs: bar("2026-02-01")
+        })
+      ).toEqual({ kind: "instant", instantMs: lateJan });
+      // The inferred span alone misses it (the gap this replaces).
+      expect(
+        columnForInstant(
+          lateJan,
+          halfMonths.map((b) => b.xMs),
+          span
+        )
+      ).toBeUndefined();
+    });
+
+    it("keeps the exact x for an instant no declared period contains", function () {
+      expect(
+        markerColumnForInstant(ms("2026-03-05T07:22:00Z"), halfMonths, span)
+      ).toBeUndefined();
+    });
+
+    it("leaves an undeclared chart on the inferred span, unchanged", function () {
+      const days = [bar("2026-05-07"), bar("2026-05-08")];
+      const pass = ms("2026-05-08T14:32:37Z");
+      expect(
+        markerColumnForInstant(
+          pass,
+          days.map((xMs) => ({ xMs })),
+          DAY
+        )
+      ).toBe(columnForInstant(pass, days, DAY));
+      expect(
+        markerColumnForInstant(
+          pass,
+          days.map((xMs) => ({ xMs })),
+          DAY
+        )
+      ).toBe(bar("2026-05-08"));
+    });
+
+    it("treats a malformed declared period as undeclared", function () {
+      const malformed = [
+        { xMs: bar("2026-05-08"), periodEndMs: bar("2026-05-08") }
+      ];
+      expect(
+        markerColumnForInstant(ms("2026-05-08T14:32:37Z"), malformed, DAY)
+      ).toBe(bar("2026-05-08"));
     });
   });
 

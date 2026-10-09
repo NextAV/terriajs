@@ -124,6 +124,73 @@ export function columnForInstant(
   return best;
 }
 
+/** A bar's x and, when the data declares one, the period it stands for. */
+export interface BarColumn {
+  xMs: number;
+  periodStartMs?: number;
+  periodEndMs?: number;
+}
+
+function hasDeclaredPeriod(bar: BarColumn): boolean {
+  const start = Number.isFinite(bar.periodStartMs)
+    ? (bar.periodStartMs as number)
+    : bar.xMs;
+  return (
+    bar.periodEndMs !== undefined &&
+    Number.isFinite(bar.periodEndMs) &&
+    Number.isFinite(start) &&
+    bar.periodEndMs > start
+  );
+}
+
+/**
+ * The bar x the "selected time" marker should sit on — the marker's side of
+ * `resolveBarClick`, with the SAME two regimes so the marker and the click
+ * cannot disagree about which bar an instant belongs to.
+ *
+ * DECLARED (any bar declares a valid period): the bar whose own declared
+ * `[periodStartMs, periodEndMs)` contains the instant (the latest-starting one
+ * if periods overlap). No inferred span is used: on a half-month chart the
+ * smallest gap is 13 days, so a frame on day 29-31 of a 16-day half-month would
+ * be selected by the click on its bar while an inferred marker missed that bar.
+ * An instant no declared period contains returns `undefined` (the marker keeps
+ * its exact x), exactly as the click refuses to jump out of a period.
+ *
+ * INFERRED (no bar declares a period, every chart before this existed):
+ * `columnForInstant` over the bars' x with `spanMs`, unchanged.
+ */
+export function markerColumnForInstant(
+  instantMs: number,
+  bars: readonly BarColumn[],
+  spanMs: number = DEFAULT_COLUMN_SPAN_MS
+): number | undefined {
+  if (!Number.isFinite(instantMs)) return undefined;
+  const declared = bars.filter(hasDeclaredPeriod);
+  if (declared.length === 0) {
+    return columnForInstant(
+      instantMs,
+      bars.map((b) => b.xMs),
+      spanMs
+    );
+  }
+  let best: BarColumn | undefined;
+  let bestStart = -Infinity;
+  for (const bar of declared) {
+    const start = Number.isFinite(bar.periodStartMs)
+      ? (bar.periodStartMs as number)
+      : bar.xMs;
+    if (
+      start <= instantMs &&
+      instantMs < (bar.periodEndMs as number) &&
+      start > bestStart
+    ) {
+      best = bar;
+      bestStart = start;
+    }
+  }
+  return best === undefined ? undefined : best.xMs;
+}
+
 /**
  * Where a click on a bar sends the timeline.
  *
