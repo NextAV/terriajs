@@ -34,17 +34,41 @@ const Tooltip: React.FC<TooltipProps> = observer((props) => {
     }
   }, [props.items]);
 
+  // A point that carries its own title (`chartTooltipTitleColumn`) names its
+  // row, so the tooltip is restricted to items at that SAME x: a series whose
+  // nearest point is a neighbouring row would otherwise be listed under this
+  // row's title. Without a titled point this is every item, as before.
+  const titled = useMemo(
+    () => items.find(({ point }) => point.tooltipTitle !== undefined),
+    [items]
+  );
+  const rowItems = useMemo(
+    () =>
+      titled
+        ? items.filter(({ point }) => +point.x === +titled.point.x)
+        : items,
+    [items, titled]
+  );
+
   const title = useMemo(() => {
+    if (titled) return titled.point.tooltipTitle;
     if (items.length > 0) {
       // derive title from first item x
       const x = items[0].point.x;
       return x instanceof Date ? dateformat(x, "dd/mm/yyyy, HH:MMTT") : x;
     } else return undefined;
-  }, [items]);
+  }, [items, titled]);
+
+  // Per-ROW rows (`chartTooltipColumns`), shown once: every series drawn from
+  // one table row carries the same ones, so the first is the row's.
+  const rowRows = useMemo(
+    () => rowItems.find(({ point }) => point.tooltipRows)?.point.tooltipRows,
+    [rowItems]
+  );
 
   const groups = useMemo(() => {
     // momentLines and momentPoints are not shown in the tooltip body
-    const tooltipItems = items.filter(
+    const tooltipItems = rowItems.filter(
       ({ chartItem }) =>
         chartItem.type !== "momentLines" && chartItem.type !== "momentPoints"
     );
@@ -54,7 +78,7 @@ const Tooltip: React.FC<TooltipProps> = observer((props) => {
         items: o[1]
       })
     );
-  }, [items]);
+  }, [rowItems]);
 
   const style: CSSProperties = useMemo(() => {
     const { left, right, top, bottom } = props;
@@ -86,6 +110,13 @@ const Tooltip: React.FC<TooltipProps> = observer((props) => {
               name={groups.length > 1 ? group.name : undefined}
               items={group.items}
             />
+          ))}
+          {rowRows?.map((row) => (
+            <div key={`tooltip-row-${row.name}`} className={Styles.item}>
+              <div className={Styles.itemName}>{row.name}</div>
+              <div className={Styles.itemValue}>{row.value}</div>
+              <div>{row.units}</div>
+            </div>
           ))}
         </div>
       </VisxTooltip>

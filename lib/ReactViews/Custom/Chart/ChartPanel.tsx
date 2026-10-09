@@ -266,6 +266,23 @@ const ChartPanel: FC<ChartPanelProps> = observer(
 
     const stalenessCaption = richCaption ?? legacyStalenessCaption;
 
+    // A bar click that could not move the timeline (its declared period holds
+    // no timeline date) leaves a sentence here. It is shown only while the
+    // timeline is still on the date it was posted at, so it disappears the
+    // moment the user moves. The clock read is gated on a notice existing, so
+    // a chart that never posts one takes no dependency on the clock.
+    const notice = viewState.terria.bottomChartNotice;
+    const noticeNowJd = notice
+      ? viewState.terria.timelineStack.top?.currentTimeAsJulianDate
+      : undefined;
+    const noticeText =
+      notice &&
+      (notice.atMs === undefined ||
+        (noticeNowJd !== undefined &&
+          JulianDate.toDate(noticeNowJd).getTime() === notice.atMs))
+        ? notice.message
+        : undefined;
+
     // The tooltip has to describe whichever caption is showing. The static
     // text below was written for the staleness-only line and says nothing
     // about a predicted date -- leaving it in place would put an inferred
@@ -372,6 +389,19 @@ const ChartPanel: FC<ChartPanelProps> = observer(
                       title={captionTitle}
                     >
                       {stalenessCaption}
+                    </span>
+                  )}
+                  {noticeText && (
+                    <span
+                      role="status"
+                      data-testid="chart-period-notice"
+                      style={{
+                        marginLeft: 10,
+                        fontSize: "12px",
+                        fontWeight: 600
+                      }}
+                    >
+                      {noticeText}
                     </span>
                   )}
                 </label>

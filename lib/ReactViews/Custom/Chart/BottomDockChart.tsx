@@ -8,7 +8,11 @@ import groupBy from "lodash-es/groupBy";
 import minBy from "lodash-es/minBy";
 import { observer } from "mobx-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { columnForInstant, columnSpanMs } from "../../../Charts/barColumnSnap";
+import {
+  BarColumn,
+  columnSpanMs,
+  markerColumnForInstant
+} from "../../../Charts/barColumnSnap";
 import type { ChartPoint } from "../../../Charts/ChartData";
 import { controlStackLeft } from "../../../Charts/chartControlPlacement";
 import {
@@ -404,21 +408,26 @@ const Chart: React.FC<ChartProps> = observer(
     // Only BAR items define columns; with none (a line-only chart) the list is
     // empty, `columnForInstant` returns undefined and the marker keeps its
     // exact-instant x — byte-identical to before for every non-bar chart.
+    // A bar that DECLARES its period (chartPeriodStartColumn /
+    // chartPeriodEndColumn) is matched by that period, as the bar click is
+    // (`resolveBarClick`); otherwise by the inferred span, as before.
     const barColumns = useMemo(() => {
-      const starts = processedChartItems
+      const bars: BarColumn[] = processedChartItems
         .filter((c) => c.type === "bar")
         .flatMap((c) =>
-          c.points.map((p) =>
-            p.x instanceof Date ? p.x.getTime() : Number(p.x)
-          )
+          c.points.map((p) => ({
+            xMs: p.x instanceof Date ? p.x.getTime() : Number(p.x),
+            periodStartMs: p.periodStartMs,
+            periodEndMs: p.periodEndMs
+          }))
         );
-      return { starts, spanMs: columnSpanMs(starts) };
+      return { bars, spanMs: columnSpanMs(bars.map((b) => b.xMs)) };
     }, [processedChartItems]);
     const markerTimeMs =
       selectedTimeMs != null && Number.isFinite(selectedTimeMs)
-        ? (columnForInstant(
+        ? (markerColumnForInstant(
             selectedTimeMs,
-            barColumns.starts,
+            barColumns.bars,
             barColumns.spanMs
           ) ?? selectedTimeMs)
         : selectedTimeMs;
@@ -967,7 +976,9 @@ const ChartZoomControls: React.FC<{
         /* Name what it actually does. `⟲` conventionally reads as "fit all",
          * but with a default window configured this zooms IN to that window
          * from a fully zoomed-out view — surprising unless the label says so. */
-        title={hasDefaultWindow ? "Reset to the default time window" : "Reset view"}
+        title={
+          hasDefaultWindow ? "Reset to the default time window" : "Reset view"
+        }
         aria-label={
           hasDefaultWindow
             ? "Reset the chart's time axis to its default time window"
