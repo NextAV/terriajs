@@ -107,7 +107,7 @@
     "html-to-react": "^1.7.0",
     "i18next": "^21.8.13",
     "i18next-browser-languagedetector": "^6.1.4",
-    "i18next-http-backend": "^1.4.1",
+    "i18next-http-backend": "^4.0.2",
     "inobounce": "^0.1.2",
     "javascript-natural-sort": "^0.7.1",
     "json5": "^2.1.0",
